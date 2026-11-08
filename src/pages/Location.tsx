@@ -3,6 +3,8 @@ import type { Core, Row } from '../api';
 import { Card, DataTable, DocumentsPanel, ErrorBox, Loading, Page, StatusChip, type Col } from '../components';
 import { fmtDate, LEVEL_LABEL, locationLabel, navigate, STATUS_LABEL, useLoad } from '../util';
 import { EquipmentModal } from './Equipment';
+import { INSPECTION_COLS, StartInspectionModal } from './Inspections';
+import { ACTION_COLS, ActionModal } from './Actions';
 
 const ACT_COLS: Col[] = [
   { key: 'ref', label: 'Ref', render: (a) => <strong>{a.ref}</strong> },
@@ -20,6 +22,8 @@ export function LocationDetail({ kind, id }: { kind: 'area' | 'site' | 'room'; i
   const { data: d, error, reload } = useLoad<Row>(`/api/locations/${kind}/${id}`);
   const { data: core } = useLoad<Core>('/api/core');
   const [addEquip, setAddEquip] = useState(false);
+  const [inspecting, setInspecting] = useState(false);
+  const [addAction, setAddAction] = useState(false);
   if (error) return <ErrorBox error={error} />;
   if (!d) return <Loading />;
   const e = d.entity;
@@ -32,7 +36,14 @@ export function LocationDetail({ kind, id }: { kind: 'area' | 'site' | 'room'; i
         <span key={b.kind}>{i > 0 && ' › '}<a href={`#/${b.kind}s/${b.id}`}>{b.code} {b.name}</a></span>
       ))}
       title={<>{LEVEL_LABEL[kind]} {e.code} · {e.name} {!e.active && <span className="chip chip-none">Archived</span>}</>}
-      actions={<><a className="btn btn-primary" href="#/activities/new">+ New Activity</a> <a className="btn" href="#/admin/core">Edit in Core Data</a></>}
+      actions={
+        <>
+          {kind !== 'area' && <button className="btn-primary" onClick={() => setInspecting(true)}>Start inspection</button>}
+          {kind === 'site' && <a className="btn" href={`#/sites/${id}/print`}>Printable front sheet</a>}
+          <a className="btn" href="#/activities/new">+ New Activity</a>
+          <a className="btn" href="#/admin/core">Edit in Core Data</a>
+        </>
+      }
     >
       {kind === 'site' && <p className="muted">Property front sheet — everything due at this site, including area-wide obligations.</p>}
       <div className="kpis">
@@ -66,6 +77,13 @@ export function LocationDetail({ kind, id }: { kind: 'area' | 'site' | 'room'; i
           />
         </Card>
       )}
+      <Card title={`Remedial actions (${d.actions.filter((x: Row) => x.state !== 'Done').length} open of ${d.actions.length})`}
+        actions={kind !== 'area' && <button onClick={() => setAddAction(true)}>+ New action</button>}>
+        <DataTable cols={ACTION_COLS} rows={d.actions} onRowClick={(x) => navigate(`#/actions/${x.id}`)} empty="None" />
+      </Card>
+      <Card title={`Routine inspections (${d.inspections.length})`}>
+        <DataTable cols={INSPECTION_COLS} rows={d.inspections} onRowClick={(r) => navigate(`#/inspections/${r.id}`)} empty="No inspections yet" />
+      </Card>
       <Card title={`Equipment ${kind === 'room' ? 'in this room' : 'in child rooms'} (${d.equipment.length})`} actions={kind === 'room' && <button onClick={() => setAddEquip(true)}>+ Add equipment to this room</button>}>
         <DataTable
           rows={d.equipment}
@@ -93,6 +111,8 @@ export function LocationDetail({ kind, id }: { kind: 'area' | 'site' | 'room'; i
           ]}
         />
       </Card>
+      {inspecting && <StartInspectionModal siteId={kind === 'site' ? id : e.site_id} roomId={kind === 'room' ? id : undefined} onClose={() => setInspecting(false)} />}
+      {addAction && <ActionModal context={{ site_id: kind === 'site' ? id : e.site_id, room_id: kind === 'room' ? id : null }} onClose={() => setAddAction(false)} onSaved={(a) => { setAddAction(false); navigate(`#/actions/${a.id}`); }} />}
       {addEquip && core && <EquipmentModal core={core} roomId={id} onClose={() => setAddEquip(false)} onSaved={() => { setAddEquip(false); reload(); }} />}
     </Page>
   );

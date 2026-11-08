@@ -10,6 +10,9 @@ import { londonToday, optDate } from './dates.js';
 import { ACTIVITY_LOCATION_JOINS, latestRun, recalculate } from './recalculate.js';
 import { candidateEml, exportDrafts, isEmail, sendReminders, type CandidateRow } from './reminders.js';
 import { bad, bool01, errorMiddleware, h, HttpError, idParam, notFound, optInt, optStr, reqInt, reqStr } from './http.js';
+import { listInspections, registerInspections, type Ctx } from './inspections.js';
+import { listActions, registerActions } from './actions.js';
+import { sendCsv, toCsv } from './csv.js';
 
 export interface AppOptions {
   db: DB;
@@ -48,10 +51,11 @@ export function createApp(opts: AppOptions) {
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
 
-  // Any successful write (other than recalculation and reminder handling) marks the snapshot stale.
+  // Any successful write that can affect compliance marks the snapshot stale. Exempt: recalculation itself,
+  // reminder handling, exports, and routine inspections (which never feed compliance status).
   app.use('/api', (req, res, next) => {
     const mutating = req.method !== 'GET' && req.method !== 'HEAD';
-    const exempt = req.path.startsWith('/recalculate') || req.path.startsWith('/reminders');
+    const exempt = ['/recalculate', '/reminders', '/export', '/inspections'].some((p) => req.path.startsWith(p));
     if (mutating && !exempt) {
       const json = res.json.bind(res);
       res.json = (body: unknown) => {
@@ -413,7 +417,7 @@ export function createApp(opts: AppOptions) {
     const raw = get('SELECT * FROM compliance_activities WHERE id = ?', id)!;
     const equipment = all(`${EQUIP_SELECT} WHERE e.id IN (SELECT equipment_id FROM activity_equipment WHERE activity_id = ?) ORDER BY e.asset_code`, id)
       .map((e) => ({ ...e, in_scope: inScope(raw, e.id) }));
-    const actions = all(`SELECT x.*, u.name AS owner_name FROM actions x LEFT JOIN users u ON u.id = x.owner_user_id WHERE x.activity_id = ? ORDER BY x.id DESC`, id);
+    const actions = listActions(db, londonToday(now()), "x.activity_id = ?", [id]);
     return { ...a, equipment, actions };
   };
 
@@ -530,7 +534,10 @@ export function createApp(opts: AppOptions) {
         related.push({ ...d, via: entityLabel(d.entity_kind, d.entity_id) });
       }
     }
-    res.json({ kind, entity, breadcrumb, activities: direct, inherited, children, equipment, relatedDocuments: related });
+    const today = londonToday(now());
+    const inspections = kind === 'area' ? listInspections(db, 's.area_id = ?', [id]) : kind === 'site' ? listInspections(db, 'i.site_id = ?', [id]) : listInspections(db, 'i.room_id = ?', [id]);
+    const actions = kind === 'area' ? listActions(db, today, 'ar.id = ?', [id]) : kind === 'site' ? listActions(db, today, 'x.site_id = ?', [id]) : listActions(db, today, 'x.room_id = ?', [id]);
+    res.json({ kind, entity, breadcrumb, activities: direct, inherited, children, equipment, relatedDocuments: related, inspections, actions, today });
   }));
 
   // ---------- documents (central library) ----------
@@ -543,8 +550,8 @@ export function createApp(opts: AppOptions) {
     if (kind === 'room') { const x = r('SELECT r.code, r.name, s.code AS sc FROM rooms r JOIN sites s ON s.id = r.site_id WHERE r.id = ?'); if (x) { label = `${x.code} ${x.name} (${x.sc})`; href = `#/rooms/${id}`; } }
     if (kind === 'equipment') { const x = r('SELECT asset_code, description FROM equipment WHERE id = ?'); if (x) { label = `${x.asset_code} ${x.description}`; href = `#/equipment/${id}`; } }
     if (kind === 'activity') { const x = r('SELECT a.ref, t.name FROM compliance_activities a JOIN compliance_types t ON t.id = a.type_id WHERE a.id = ?'); if (x) { label = `${x.ref} ${x.name}`; href = `#/activities/${id}`; } }
-    if (kind === 'action') { const x = r('SELECT title FROM actions WHERE id = ?'); if (x) { label = `Action: ${x.title}`; href = '#/actions'; } }
-    if (kind === 'inspection') { const x = r('SELECT inspected_on FROM inspection_runs WHERE id = ?'); if (x) { label = `Inspection ${x.inspected_on}`; href = '#/inspections'; } }
+    if (kind === 'action') { const x = r('SELECT ref, title FROM actions WHERE id = ?'); if (x) { label = `${x.ref} ${x.title}`; href = `#/actions/${id}`; } }
+    if (kind === 'inspection') { const x = r('SELECT i.ref, i.inspected_on, s.code AS sc FROM inspection_runs i JOIN sites s ON s.id = i.site_id WHERE i.id = ?'); if (x) { label = `${x.ref} inspection ${x.sc} ${x.inspected_on.split('-').reverse().join('/')}`; href = `#/inspections/${id}`; } }
     return { kind, id, label, href };
   }
   const docLinks = (docId: number) =>
@@ -654,52 +661,51 @@ export function createApp(opts: AppOptions) {
       ...all('SELECT r.id, r.code, r.name, s.code AS sc FROM rooms r JOIN sites s ON s.id = r.site_id ORDER BY r.code').map((x) => ({ kind: 'room', id: x.id, label: `${x.code} ${x.name} (${x.sc})` })),
       ...all('SELECT id, asset_code, description FROM equipment ORDER BY asset_code').map((x) => ({ kind: 'equipment', id: x.id, label: `${x.asset_code} ${x.description}` })),
       ...all('SELECT a.id, a.ref, t.name FROM compliance_activities a JOIN compliance_types t ON t.id = a.type_id WHERE a.archived_at IS NULL ORDER BY a.ref').map((x) => ({ kind: 'activity', id: x.id, label: `${x.ref} ${x.name}` })),
-      ...all('SELECT id, title FROM actions ORDER BY id DESC').map((x) => ({ kind: 'action', id: x.id, label: `Action: ${x.title}` })),
+      ...all('SELECT id, ref, title FROM actions ORDER BY id DESC').map((x) => ({ kind: 'action', id: x.id, label: `${x.ref} ${x.title}` })),
+      ...all('SELECT i.id, i.ref, i.inspected_on, s.code AS sc FROM inspection_runs i JOIN sites s ON s.id = i.site_id ORDER BY i.id DESC')
+        .map((x) => ({ kind: 'inspection', id: x.id, label: `${x.ref} inspection ${x.sc} ${x.inspected_on}` })),
     ]);
   }));
 
-  // ---------- actions (minimal P0 register; full workflow is P1) ----------
-  const ACTION_SELECT = `SELECT x.*, a.ref AS activity_ref, s.code AS site_code, u.name AS owner_name FROM actions x
-    LEFT JOIN compliance_activities a ON a.id = x.activity_id LEFT JOIN sites s ON s.id = x.site_id LEFT JOIN users u ON u.id = x.owner_user_id`;
-  const PRIORITIES = ['Low', 'Medium', 'High', 'Critical'];
-  const STATES = ['Open', 'In progress', 'Done'];
-  app.get('/api/actions', h((_req, res) => res.json(all(`${ACTION_SELECT} ORDER BY CASE x.state WHEN 'Done' THEN 1 ELSE 0 END, x.due_on IS NULL, x.due_on`))));
-  app.post('/api/actions', h((req, res) => {
-    const b = req.body ?? {};
-    const activityId = optInt(b.activity_id, 'Activity');
-    let siteId = optInt(b.site_id, 'Site');
-    if (activityId !== null) {
-      const a = listActivities('a.id = ?', [activityId], true)[0];
-      if (!a) throw notFound('Activity');
-      siteId = siteId ?? (a.site_id || null);
-    }
-    if (siteId !== null) must('SELECT id FROM sites WHERE id = ?', siteId, 'Site');
-    const priority = b.priority ? String(b.priority) : 'Medium';
-    if (!PRIORITIES.includes(priority)) throw bad('Invalid priority');
-    const owner = optInt(b.owner_user_id, 'Owner');
-    if (owner !== null) must('SELECT id FROM users WHERE id = ?', owner, 'Owner');
-    const id = run(`INSERT INTO actions (activity_id, site_id, title, priority, owner_user_id, due_on, state, notes, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'Open', ?, ?, ?)`, activityId, siteId, reqStr(b.title, 'Title'), priority, owner, optDate(b.due_on, 'Due'), optStr(b.notes), ts(), ts()).lastInsertRowid;
-    res.status(201).json(get(`${ACTION_SELECT} WHERE x.id = ?`, id));
-  }));
-  app.put('/api/actions/:id', h((req, res) => {
-    const id = idParam(req);
-    const cur = must('SELECT * FROM actions WHERE id = ?', id, 'Action');
-    const b = req.body ?? {};
-    const state = b.state !== undefined ? String(b.state) : cur.state;
-    const priority = b.priority !== undefined ? String(b.priority) : cur.priority;
-    if (!STATES.includes(state)) throw bad('Invalid state');
-    if (!PRIORITIES.includes(priority)) throw bad('Invalid priority');
-    run('UPDATE actions SET title = ?, priority = ?, state = ?, due_on = ?, owner_user_id = ?, notes = ?, closed_at = ?, updated_at = ? WHERE id = ?',
-      b.title !== undefined ? reqStr(b.title, 'Title') : cur.title, priority, state,
-      b.due_on !== undefined ? optDate(b.due_on, 'Due') : cur.due_on,
-      b.owner_user_id !== undefined ? optInt(b.owner_user_id, 'Owner') : cur.owner_user_id,
-      b.notes !== undefined ? optStr(b.notes) : cur.notes,
-      state === 'Done' ? (cur.closed_at ?? ts()) : null, ts(), id);
-    res.json(get(`${ACTION_SELECT} WHERE x.id = ?`, id));
-  }));
-
   app.get('/api/checklist', h((_req, res) => res.json(all('SELECT * FROM checklist_questions ORDER BY sort_order'))));
+
+  // ---------- P1: inspections, actions, exports ----------
+  const ctx: Ctx = { db, ts, today: () => londonToday(now()), nextCode };
+  registerInspections(app, ctx);
+  registerActions(app, ctx);
+
+  /** CSV of the caller's currently filtered Activities register, in the order given. */
+  app.post('/api/export/activities', h((req, res) => {
+    const ids: number[] | null = Array.isArray(req.body?.ids) ? req.body.ids.map((x: unknown) => reqInt(x, 'id')) : null;
+    const rowsAll = listActivities('1=1', [], true);
+    const byId = new Map(rowsAll.map((a) => [a.id, a]));
+    const rows = ids ? ids.map((i) => byId.get(i)).filter((a): a is Row => !!a) : rowsAll.filter((a) => !a.archived_at);
+    const lr = latestRun(db);
+    const STATUS: Record<string, string> = { green: 'Up to date', amber: 'Due soon', red: 'Overdue / at risk', grey: 'Unknown / missing', na: 'Not applicable' };
+    sendCsv(res, 'compliance-activities.csv', toCsv(rows, [
+      { header: 'Ref', value: (a) => a.ref },
+      { header: 'Area', value: (a) => `${a.area_code} ${a.area_name}` },
+      { header: 'Site', value: (a) => (a.site_code ? `${a.site_code} ${a.site_name}` : '') },
+      { header: 'Room', value: (a) => (a.room_code ? `${a.room_code} ${a.room_name}` : '') },
+      { header: 'Level', value: (a) => a.location_level },
+      { header: 'Type', value: (a) => a.type_code },
+      { header: 'Type name', value: (a) => a.type_name },
+      { header: 'Activity', value: (a) => a.name },
+      { header: 'Equipment count', value: (a) => a.equipment_count },
+      { header: 'Last done', value: (a) => a.last_done_on },
+      { header: 'Next due', value: (a) => a.snap_due_on ?? a.next_due_on },
+      { header: 'Days to due', value: (a) => a.days_to_due },
+      { header: 'Status', value: (a) => (a.status ? STATUS[a.status] : 'Not yet calculated') },
+      { header: 'Status reason', value: (a) => a.status_reason },
+      { header: 'Status calculated at', value: () => lr?.created_at ?? '' },
+      { header: 'Responsible', value: (a) => a.owner_name },
+      { header: 'Applicability', value: (a) => a.applicability },
+      { header: 'Documents linked', value: (a) => a.doc_count },
+      { header: 'Verified documents', value: (a) => a.verified_doc_count },
+      { header: 'Open actions', value: (a) => a.open_actions },
+      { header: 'Archived', value: (a) => (a.archived_at ? 'Yes' : '') },
+    ]));
+  }));
 
   // ---------- manual recalculation ----------
   app.post('/api/recalculate', h((_req, res) => {

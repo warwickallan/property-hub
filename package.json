@@ -11,7 +11,9 @@
     "serve": "tsx server/index.ts",
     "seed": "tsx server/seed-cli.ts --reset",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "vite build && node e2e/run.mjs",
+    "check": "tsc --noEmit && vitest run && vite build && node e2e/run.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -38,6 +40,7 @@
     "@vitejs/plugin-react": "^4.7.0",
     "concurrently": "^9.2.5",
     "jsdom": "^26.1.0",
+    "puppeteer-core": "^23.11.1",
     "supertest": "^7.3.2",
     "typescript": "^5.9.3",
     "vite": "^6.4.5",

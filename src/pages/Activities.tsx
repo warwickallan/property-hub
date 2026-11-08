@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import type { Core, Row } from '../api';
+import { useMemo, useState } from 'react';
+import { downloadCsv, type Core, type Row } from '../api';
 import { Card, DataTable, ErrorBox, Loading, LocationSelects, Page, StatusChip, Tabs, useStoredState, type Col, type LocFilter } from '../components';
 import { fmtDate, locationLabel, navigate, STATUS_LABEL, useLoad } from '../util';
 
@@ -117,6 +117,19 @@ function FilterBar({ core, f, set, extended }: { core: Core; f: Filters; set: (f
   );
 }
 
+function ExportButton({ rows }: { rows: Row[] }) {
+  const [err, setErr] = useState<string | null>(null);
+  return (
+    <>
+      <button title="Exports exactly the rows currently shown, in this filter" onClick={async () => {
+        setErr(null);
+        try { await downloadCsv('/api/export/activities', { ids: rows.map((r) => r.id) }, 'compliance-activities.csv'); } catch (e: any) { setErr(e.message); }
+      }}>Export CSV ({rows.length})</button>
+      {err && <span className="error small">{err}</span>}
+    </>
+  );
+}
+
 function useActivityData() {
   const core = useLoad<Core>('/api/core');
   const acts = useLoad<Row[]>('/api/activities');
@@ -170,7 +183,7 @@ export function Dashboard() {
     ['Open actions', (actions ?? []).filter((x) => x.state !== 'Done').length, '', ''],
   ];
   return (
-    <Page title="Dashboard" actions={<a className="btn btn-primary" href="#/activities/new">+ New Activity</a>}>
+    <Page title="Dashboard" actions={<>{f.view !== 'location' && f.view !== 'type' && <ExportButton rows={viewRows} />}<a className="btn btn-primary" href="#/activities/new">+ New Activity</a></>}>
       {!acts.some((a) => a.status) && <div className="note">Statuses are <strong>Not yet calculated</strong>. Click <strong>Recalculate Compliance</strong> in the header.</div>}
       <div className="kpis">
         {kpis.map(([label, value, cls, view]) => (
@@ -207,7 +220,7 @@ export function ActivitiesRegister() {
   if (error) return <ErrorBox error={error} />;
   if (!core || !acts) return <Loading />;
   return (
-    <Page title="Compliance Activities" actions={<a className="btn btn-primary" href="#/activities/new">+ New Activity</a>}>
+    <Page title="Compliance Activities" actions={<><ExportButton rows={rows} /><a className="btn btn-primary" href="#/activities/new">+ New Activity</a></>}>
       <FilterBar core={core} f={f} set={setF} extended />
       <Card>
         <DataTable

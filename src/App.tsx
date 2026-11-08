@@ -7,8 +7,9 @@ import { EquipmentRegister, EquipmentDetail } from './pages/Equipment';
 import { DocumentsLibrary } from './pages/Documents';
 import { LocationDetail } from './pages/Location';
 import { Reminders } from './pages/Reminders';
-import { ActionsRegister } from './pages/Actions';
-import { Inspections } from './pages/Inspections';
+import { ActionsRegister, ActionDetail } from './pages/Actions';
+import { Inspections, InspectionDetail } from './pages/Inspections';
+import { SiteFrontSheetPrint } from './pages/Print';
 import { AdminPeople, AdminCoreData, AdminTypes, AdminSettings, ServiceCharges } from './pages/Admin';
 
 function useHash() {
@@ -51,9 +52,10 @@ function route(hash: string) {
     case 'equipment': return id ? <EquipmentDetail id={id} /> : <EquipmentRegister />;
     case 'documents': return <DocumentsLibrary />;
     case 'areas': case 'sites': case 'rooms':
+      if (a === 'sites' && id && c === 'print') return <SiteFrontSheetPrint id={id} />;
       return id ? <LocationDetail kind={a.slice(0, -1) as 'area' | 'site' | 'room'} id={id} key={hash} /> : <AdminCoreData />;
-    case 'inspections': return <Inspections />;
-    case 'actions': return <ActionsRegister />;
+    case 'inspections': return id ? <InspectionDetail id={id} key={id} /> : <Inspections />;
+    case 'actions': return id ? <ActionDetail id={id} key={id} /> : <ActionsRegister />;
     case 'reminders': return <Reminders />;
     case 'service-charges': return <ServiceCharges />;
     case 'admin':
@@ -114,6 +116,7 @@ export function App() {
     window.addEventListener('ph:recalculated', f);
     return () => window.removeEventListener('ph:recalculated', f);
   }, []);
+  if (/^#\/sites\/\d+\/print/.test(hash)) return <main className="print-main" key={gen}>{route(hash)}</main>;
   const active = (h: string) => (h === '#/' ? hash === '#/' || hash === '#' : hash.startsWith(h));
   return (
     <div className="layout">

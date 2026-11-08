@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, type Core, type Row } from '../api';
 import { Card, DataTable, DocumentsPanel, ErrorBox, Field, Loading, Modal, Page, StatusChip, Tabs } from '../components';
 import { fmtDate, fmtDateTime, LEVEL_LABEL, navigate, useLoad } from '../util';
+import { ACTION_COLS, ActionModal } from './Actions';
 
 function Crumbs({ a }: { a: Row }) {
   return (
@@ -219,41 +220,18 @@ function History({ id }: { id: number }) {
 }
 
 function ActivityActions({ a, onChange }: { a: Row; onChange: () => void }) {
-  const [form, setForm] = useState({ title: '', priority: 'Medium', due_on: '' });
-  const [err, setErr] = useState<string | null>(null);
-  const add = async () => {
-    setErr(null);
-    try {
-      await api.post('/api/actions', { ...form, activity_id: a.id, owner_user_id: a.owner_user_id });
-      setForm({ title: '', priority: 'Medium', due_on: '' });
-      onChange();
-    } catch (e: any) {
-      setErr(e.message);
-    }
-  };
+  const [adding, setAdding] = useState(false);
   return (
-    <Card title="Actions">
-      <DataTable
-        rows={a.actions}
-        empty="No actions"
-        cols={[
-          { key: 'title', label: 'Action' },
-          { key: 'priority', label: 'Priority', render: (x) => <span className={x.priority === 'Critical' ? 'warn' : ''}>{x.priority}</span> },
-          { key: 'state', label: 'State' },
-          { key: 'due_on', label: 'Due', render: (x) => fmtDate(x.due_on) },
-          { key: 'owner_name', label: 'Owner' },
-        ]}
-      />
-      <div className="filters">
-        <input placeholder="New action title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-        <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
-          {['Low', 'Medium', 'High', 'Critical'].map((p) => <option key={p}>{p}</option>)}
-        </select>
-        <input type="date" value={form.due_on} onChange={(e) => setForm({ ...form, due_on: e.target.value })} />
-        <button onClick={add}>Add action</button>
-      </div>
-      <ErrorBox error={err} />
-      <p className="muted small">An open Critical action turns this activity red at the next Recalculate.</p>
+    <Card title="Remedial actions" actions={<button onClick={() => setAdding(true)}>+ New action</button>}>
+      <DataTable cols={ACTION_COLS} rows={a.actions} onRowClick={(x) => navigate(`#/actions/${x.id}`)} empty="No actions linked to this activity" />
+      <p className="muted small">An open Critical action turns this activity red at the <strong>next</strong> Recalculate. Closing it clears that effect at the following Recalculate.</p>
+      {adding && (
+        <ActionModal
+          context={{ activity_id: a.id, site_id: a.site_id, room_id: a.location_level === 'room' ? a.room_id : null, owner_user_id: a.owner_user_id }}
+          onClose={() => setAdding(false)}
+          onSaved={() => { setAdding(false); onChange(); }}
+        />
+      )}
     </Card>
   );
 }

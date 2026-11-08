@@ -54,3 +54,8 @@ export function locationLabel(a: Record<string, any>): string {
   if (a.location_level === 'site') return 'Whole site';
   return 'Whole area';
 }
+
+/** Today's calendar date in Europe/London as yyyy-mm-dd. */
+export function londonToday(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+}

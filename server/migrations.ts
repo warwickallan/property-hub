@@ -259,4 +259,29 @@ CREATE TABLE email_log (
 CREATE UNIQUE INDEX ux_email_first_send ON email_log(message_key) WHERE outcome = 'sent' AND resend = 0;
 `,
   },
+  {
+    version: 2,
+    name: 'P1 routine inspections (inspector, refs) and remedial actions (description, room, source inspection, closure)',
+    sql: `
+ALTER TABLE inspection_runs ADD COLUMN ref TEXT;
+ALTER TABLE inspection_runs ADD COLUMN inspector_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+ALTER TABLE inspection_runs ADD COLUMN inspector_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE inspection_runs ADD COLUMN template_code TEXT NOT NULL DEFAULT '';
+ALTER TABLE inspection_runs ADD COLUMN template_version TEXT NOT NULL DEFAULT '';
+ALTER TABLE inspection_runs ADD COLUMN updated_at TEXT;
+UPDATE inspection_runs SET ref = 'PH-I' || printf('%03d', id), updated_at = created_at WHERE ref IS NULL;
+CREATE UNIQUE INDEX ux_inspection_ref ON inspection_runs(ref);
+CREATE INDEX idx_inspection_site ON inspection_runs(site_id);
+
+ALTER TABLE actions ADD COLUMN ref TEXT;
+ALTER TABLE actions ADD COLUMN description TEXT NOT NULL DEFAULT '';
+ALTER TABLE actions ADD COLUMN room_id INTEGER REFERENCES rooms(id) ON DELETE SET NULL;
+ALTER TABLE actions ADD COLUMN inspection_run_id INTEGER REFERENCES inspection_runs(id) ON DELETE SET NULL;
+ALTER TABLE actions ADD COLUMN closure_notes TEXT NOT NULL DEFAULT '';
+UPDATE actions SET ref = 'PH-X' || printf('%03d', id) WHERE ref IS NULL;
+CREATE UNIQUE INDEX ux_action_ref ON actions(ref);
+CREATE INDEX idx_actions_site ON actions(site_id);
+CREATE INDEX idx_actions_run ON actions(inspection_run_id);
+`,
+  },
 ];

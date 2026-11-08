@@ -39,3 +39,17 @@ export interface Core {
   types: Row[];
   equipment: Row[];
 }
+
+/** POST to an export endpoint and save the returned CSV under `filename`. */
+export async function downloadCsv(url: string, body: unknown, filename: string) {
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!res.ok) throw new ApiError(res.status, (await res.json().catch(() => null))?.error ?? 'Export failed');
+  const blob = await res.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}

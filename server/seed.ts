@@ -128,8 +128,8 @@ export function seedDemo(db: DB, uploadsDir: string, today: string): boolean {
     );
     const docLink = db.prepare('INSERT INTO document_links (document_id, entity_kind, entity_id, link_role, created_at) VALUES (?, ?, ?, ?, ?)');
     const action = db.prepare(
-      `INSERT INTO actions (activity_id, site_id, title, priority, owner_user_id, due_on, state, notes, created_at, updated_at)
-       VALUES (?, ?, ?, 'Critical', ?, ?, 'Open', 'Fictional demo action', ?, ?)`,
+      `INSERT INTO actions (ref, activity_id, site_id, title, priority, owner_user_id, due_on, state, notes, created_at, updated_at)
+       VALUES ('PH-X' || printf('%03d', (SELECT COUNT(*) + 1 FROM actions)), ?, ?, ?, 'Critical', ?, ?, 'Open', 'Fictional demo action', ?, ?)`,
     );
 
     // Scenario overrides keyed "siteNo/TYPE" (siteNo 1..10) to give a realistic RAG spread.
@@ -228,7 +228,38 @@ export function seedDemo(db: DB, uploadsDir: string, today: string): boolean {
     docLink.run(did, 'activity', areaActId, 'evidence', now);
     docLink.run(did, 'area', areaIds[0], 'reference', now);
 
+    seedInspections(db, today, now, users);
     setSetting(db, 'recalculation_pending', 'false');
   })();
   return true;
+}
+
+/** Two fictional routine inspections: one completed (with an Issue and its remedial action), one draft in progress. */
+function seedInspections(db: DB, today: string, now: string, users: number[]) {
+  const qs = db.prepare('SELECT code FROM checklist_questions ORDER BY sort_order').all() as { code: string }[];
+  if (!qs.length) return;
+  const tmpl = db.prepare('SELECT template_code, template_version FROM checklist_questions LIMIT 1').get() as { template_code: string; template_version: string };
+  const site = (code: string) => (db.prepare('SELECT id FROM sites WHERE code = ?').get(code) as { id: number }).id;
+  const run = db.prepare(
+    `INSERT INTO inspection_runs (ref, site_id, room_id, inspected_on, state, completed_at, notes, inspector_user_id, inspector_name, template_code, template_version, created_at, updated_at)
+     VALUES (?, ?, NULL, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)`,
+  );
+  const ans = db.prepare('INSERT INTO inspection_answers (run_id, question_code, response, notes) VALUES (?, ?, ?, ?)');
+
+  const done = Number(run.run('PH-I001', site('PH-S001'), addDays(today, -14), 'complete', now, 'Fictional demo inspection', users[1],
+    tmpl.template_code, tmpl.template_version, now, now).lastInsertRowid);
+  let issueAnswer = 0;
+  qs.forEach((q, i) => {
+    const response = i === 4 ? 'Issue' : i === 11 ? 'Not applicable' : 'Pass';
+    const id = Number(ans.run(done, q.code, response, i === 4 ? 'Wedge found holding a door open (demo)' : '').lastInsertRowid);
+    if (i === 4) issueAnswer = id;
+  });
+  db.prepare(
+    `INSERT INTO actions (ref, activity_id, inspection_answer_id, inspection_run_id, site_id, title, description, priority, owner_user_id, due_on, state, notes, created_at, updated_at)
+     VALUES ('PH-X' || printf('%03d', (SELECT COUNT(*) + 1 FROM actions)), NULL, ?, ?, ?, ?, ?, 'High', ?, ?, 'In progress', '', ?, ?)`,
+  ).run(issueAnswer, done, site('PH-S001'), 'Remove door wedge and brief staff (demo)', 'Raised from routine inspection PH-I001.', users[1], addDays(today, 7), now, now);
+
+  const draft = Number(run.run('PH-I002', site('PH-S002'), today, 'draft', null, 'Fictional draft inspection', users[1],
+    tmpl.template_code, tmpl.template_version, now, now).lastInsertRowid);
+  qs.slice(0, 12).forEach((q) => ans.run(draft, q.code, 'Pass', ''));
 }

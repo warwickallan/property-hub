@@ -38,3 +38,6 @@ tmp/
 Thumbs.db
 .vscode/
 .idea/
+
+# Browser journey output
+e2e/output/
