@@ -1,4 +1,6 @@
-# Property Hub — Lightweight single-user specification
+# Property Hub — v0.2 legacy brief (partially superseded by v0.3)
+
+> **IMPORTANT — 2026-11-08:** Read **`PROPERTYHUB_UI_DATA_MODEL_V03.md`** and **`OPUS_START_HERE.md`** first. They supersede the flat `properties`/`property_checks` schema, old navigation, and the v0.2 instruction not to build Area/Site/Room or Equipment records. Keep the v0.2 date logic, manual recalculation, reminders and 30 inspection questions where compatible. The Site now represents an accommodation/property; Compliance Activity is the scheduled obligation at a chosen location level. The Admin section now includes staff directory records, core hierarchy, equipment, and compliance-type setup.
 
 **Version:** 0.2 | **8 November 2026** | **Status:** build brief, not production approval  
 **Prepared for:** the project owner, the operator and Opus | **Source:** the organisation Compliance Officer request + `New H&S checks all areas.xlsx`
