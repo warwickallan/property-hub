@@ -23,6 +23,7 @@ coverage/
 *.db-shm
 storage/
 uploads/
+outbox/
 data/private/
 *.bak
 

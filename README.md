@@ -1,29 +1,46 @@
 # Property Hub
 
-A lightweight **single-operator property compliance tracker**: property register, document and certificate records, manual PPM/compliance recalculation, colour-coded due dates, simple inspections and reviewable email reminder drafts.
+A local-first, **single-operator property compliance tracker** (v0.3). Area › Site › Room › Equipment hierarchy, scheduled Compliance Activities, one central document library with reusable links, **manual** compliance recalculation, and reviewable reminder drafts. Fictional demo data only.
 
-**Status:** Specification / development kickoff. The application is **not built or deployed** yet.
+## Run it (one command)
 
-## Intended first cut
+Requires Node 20+.
 
-- A mobile-friendly web application using React/Next.js and SQLite with persistent local data.
-- One operator maintains records. Team leaders only receive reminders; they do not log into Property Hub.
-- Compliance statuses update when the operator clicks **Recalculate Compliance**, not through a background scheduler.
-- Preview reminder messages before sending; never send real email during prototyping.
-- A 30-item visual-inspection template imported from `data/inspection_template_seed.json`.
-- Certificates and inspection evidence belong to properties, with configurable check frequencies.
-- Service charge management is deferred until requirements are clarified.
+```bash
+npm install && npm start
+```
 
-## Begin development
+Then open **http://localhost:3001**. The first start creates `data/propertyhub.db` and seeds fictional demo data (2 Areas, 10 Sites, rooms, equipment, five compliance types and 51 activities). The server listens on 127.0.0.1 only. It has no authentication and must not be exposed on a network.
 
-1. Read [Opus kickoff](docs/OPUS_START_HERE.md).
-2. Read [full product specification](docs/PROPERTYHUB_BUILD_SPEC.md).
-3. Import the [inspection checklist seed](data/inspection_template_seed.json).
-4. Build against **fictional properties and synthetic test data**.
-5. Demonstrate: Dashboard → Property → Inspection/evidence → Remedial action → Recalculate → Reminder preview.
+| Command | Purpose |
+|---|---|
+| `npm start` | Build the UI and serve app + API on :3001 |
+| `npm run dev` | Hot-reload dev mode (UI on :5173, API on :3001) |
+| `npm test` | API + calculation tests (Vitest, in-memory DB) |
+| `npm run typecheck` | TypeScript check |
+| `npm run seed` | **Reset** the database to fresh demo data |
 
-The repository is source control, **not a document vault**. Do not commit real property addresses, personal information, credentials, uploads, or a live SQLite database.
+`PH_DATA_DIR` and `PORT` override the data folder and port.
 
-## Development boundaries
+## What's in P0
 
-The repo and initial document commit are authorised. Further pushes, external deployments, real email sends and use of live organisational information require explicit project-owner instruction.
+- **Dashboard** (home): KPIs, cascading Area › Site › Room filters plus type, status, responsible, equipment, due range and search. Quick views: All, Overdue, Due Soon, By Location, By Type, Missing Evidence.
+- **Compliance Activities**: register and create/edit. Each activity has one type and one location at Area, Site or Room level, with optional equipment that must be within that scope. Detail tabs: Overview & Schedule, Linked Equipment, Documents, History, Actions.
+- **Equipment**: register and detail. Equipment always belongs to a Room. Moving it flags activity links that fall out of scope.
+- **Documents**: each file is uploaded once to `data/uploads` and linked to any Area, Site, Room, Equipment, Activity or Action. Uploading does not verify a file. The operator ticks Reviewed/Verified separately.
+- **Location detail / Site front sheet**: activities (direct and inherited), child rooms, equipment, direct and related documents.
+- **Recalculate Compliance** (header button) is the only thing that changes statuses. Saves show "Changes pending recalculation". Dates use Europe/London: an item due today is amber and becomes red the next day. Missing required verified evidence shows as unknown. An open Critical action shows red.
+- **Reminders**: generated only by Recalculate. Preview or edit drafts, export `.eml`, or demo-send to `data/outbox`. Includes a duplicate guard with explicit resend. **No real email is ever sent.**
+- **Actions**: minimal register. **Admin / Setup**: People/Users (contacts only, no logins), Core Data editor, Compliance Types (Add Type), Settings.
+
+**P1 (not built yet):** the 30-question inspection runs (the questions are imported and previewed under Inspections), full action workflow, exports. **P2:** service charges (placeholder).
+
+## Specs
+
+1. [docs/OPUS_START_HERE.md](docs/OPUS_START_HERE.md): build mandate
+2. [docs/PROPERTYHUB_UI_DATA_MODEL_V03.md](docs/PROPERTYHUB_UI_DATA_MODEL_V03.md): authoritative v0.3 model
+3. [docs/PROPERTYHUB_BUILD_SPEC.md](docs/PROPERTYHUB_BUILD_SPEC.md): legacy v0.2 (date and reminder detail)
+
+## Data and boundaries
+
+The repository is source control, **not a document vault**. `data/propertyhub.db`, `data/uploads/` and `data/outbox/` are git-ignored. Back up by stopping the app and copying `data/`. Do not enter real addresses, residents or certificates. Pushing, deployment and real email sending all need explicit project-owner instruction.
