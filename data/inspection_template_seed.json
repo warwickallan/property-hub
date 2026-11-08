@@ -1,0 +1,559 @@
+{
+  "template_code": "PH-PROP-CHECK-001",
+  "name": "Routine Accommodation & Property H&S Visual Inspection",
+  "version": "1.0.0-seed",
+  "source_file": "New H&S checks all areas.xlsx",
+  "source_purpose": "Routine visual observation checklist, not certificates or legal duty schedule",
+  "approval_status": "DRAFT — for Compliance Officer review",
+  "question_count": 30,
+  "groups": [
+    "Fire Safety",
+    "Security",
+    "Gas, Electrical & Utilities",
+    "Health & Wellbeing Risks",
+    "General Property Safety"
+  ],
+  "safety_notice": "Use fictional property references and do not record occupant-identifying or sensitive personal details in prototype notes.",
+  "questions": [
+    {
+      "code": "CHK-001",
+      "group": "Fire Safety",
+      "question": "Smoke alarms – present, working (test them)",
+      "sort_order": 1,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "FIRE SAFETY & SECURITY",
+      "source_row": 2,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-002",
+      "group": "Fire Safety",
+      "question": "Carbon monoxide alarms – present where required and working",
+      "sort_order": 2,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "FIRE SAFETY & SECURITY",
+      "source_row": 3,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-003",
+      "group": "Fire Safety",
+      "question": "Fire doors – not damaged, close properly",
+      "sort_order": 3,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "FIRE SAFETY & SECURITY",
+      "source_row": 4,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-004",
+      "group": "Fire Safety",
+      "question": "Escape routes – clear, no obstructions",
+      "sort_order": 4,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "FIRE SAFETY & SECURITY",
+      "source_row": 5,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-005",
+      "group": "Fire Safety",
+      "question": "Fire exits – accessible and usable",
+      "sort_order": 5,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "FIRE SAFETY & SECURITY",
+      "source_row": 6,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-006",
+      "group": "Fire Safety",
+      "question": "Emergency lighting",
+      "sort_order": 6,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "FIRE SAFETY & SECURITY",
+      "source_row": 7,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-007",
+      "group": "Fire Safety",
+      "question": "Fire blankets/extinguishers (if provided) – in place and not tampered with",
+      "sort_order": 7,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "FIRE SAFETY & SECURITY",
+      "source_row": 8,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-008",
+      "group": "Fire Safety",
+      "question": "Any obvious fire risks (overloaded sockets, unsafe heaters, etc.)",
+      "sort_order": 8,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "FIRE SAFETY & SECURITY",
+      "source_row": 9,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-009",
+      "group": "Security",
+      "question": "Doors and windows lock properly",
+      "sort_order": 9,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "FIRE SAFETY & SECURITY",
+      "source_row": 12,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-010",
+      "group": "Security",
+      "question": "CCTV/Entry systems/intercoms working (if applicable)",
+      "sort_order": 10,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "FIRE SAFETY & SECURITY",
+      "source_row": 13,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-011",
+      "group": "Security",
+      "question": "No signs of forced entry or damage",
+      "sort_order": 11,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "FIRE SAFETY & SECURITY",
+      "source_row": 14,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-012",
+      "group": "Security",
+      "question": "Keys/fobs managed appropriately",
+      "sort_order": 12,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "FIRE SAFETY & SECURITY",
+      "source_row": 15,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-013",
+      "group": "Gas, Electrical & Utilities",
+      "question": "No exposed wiring or damaged sockets",
+      "sort_order": 13,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "GAS ELECTRICAL & UTILITIES",
+      "source_row": 2,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-014",
+      "group": "Gas, Electrical & Utilities",
+      "question": "No signs of unsafe electrical use (extension overloads, burn marks)",
+      "sort_order": 14,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "GAS ELECTRICAL & UTILITIES",
+      "source_row": 3,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-015",
+      "group": "Gas, Electrical & Utilities",
+      "question": "Heating and hot water are working",
+      "sort_order": 15,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "GAS ELECTRICAL & UTILITIES",
+      "source_row": 4,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-016",
+      "group": "Gas, Electrical & Utilities",
+      "question": "No smell of gas or signs of leaks",
+      "sort_order": 16,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "GAS ELECTRICAL & UTILITIES",
+      "source_row": 5,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-017",
+      "group": "Gas, Electrical & Utilities",
+      "question": "Appliances provided are in safe condition and clean(fridges,microwave,oven)",
+      "sort_order": 17,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "GAS ELECTRICAL & UTILITIES",
+      "source_row": 6,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-018",
+      "group": "Health & Wellbeing Risks",
+      "question": "Any immediate safeguarding concerns",
+      "sort_order": 18,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "RESTRICTED",
+      "source_sheet": "HEALTH & WELLBEING RISKS",
+      "source_row": 2,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-019",
+      "group": "Health & Wellbeing Risks",
+      "question": "Evidence of hoarding or unsafe living conditions",
+      "sort_order": 19,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "RESTRICTED",
+      "source_sheet": "HEALTH & WELLBEING RISKS",
+      "source_row": 3,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-020",
+      "group": "Health & Wellbeing Risks",
+      "question": "Drug/alcohol-related risks (e.g. paraphernalia left out)",
+      "sort_order": 20,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "RESTRICTED",
+      "source_sheet": "HEALTH & WELLBEING RISKS",
+      "source_row": 4,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-021",
+      "group": "Health & Wellbeing Risks",
+      "question": "Hazardous materials locked away",
+      "sort_order": 21,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "RESTRICTED",
+      "source_sheet": "HEALTH & WELLBEING RISKS",
+      "source_row": 5,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-022",
+      "group": "Health & Wellbeing Risks",
+      "question": "Aggressive damage to property that could cause harm",
+      "sort_order": 22,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "RESTRICTED",
+      "source_sheet": "HEALTH & WELLBEING RISKS",
+      "source_row": 6,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-023",
+      "group": "Health & Wellbeing Risks",
+      "question": "Residents aware of basic safety (e.g. not disabling alarms)",
+      "sort_order": 23,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "RESTRICTED",
+      "source_sheet": "HEALTH & WELLBEING RISKS",
+      "source_row": 7,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-024",
+      "group": "General Property Safety",
+      "question": "Trip hazards (loose flooring, clutter in walkways)",
+      "sort_order": 24,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "GENERAL PROPERTY SAFETY",
+      "source_row": 2,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-025",
+      "group": "General Property Safety",
+      "question": "Stairs/handrails secure",
+      "sort_order": 25,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "GENERAL PROPERTY SAFETY",
+      "source_row": 3,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-026",
+      "group": "General Property Safety",
+      "question": "Windows safe and not broken (including restrictors if relevant)",
+      "sort_order": 26,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "GENERAL PROPERTY SAFETY",
+      "source_row": 4,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-027",
+      "group": "General Property Safety",
+      "question": "Adequate lighting in all areas",
+      "sort_order": 27,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "GENERAL PROPERTY SAFETY",
+      "source_row": 5,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-028",
+      "group": "General Property Safety",
+      "question": "Signs of damp, mould, or leaks",
+      "sort_order": 28,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "GENERAL PROPERTY SAFETY",
+      "source_row": 6,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-029",
+      "group": "General Property Safety",
+      "question": "Pest issues (rodents, insects)",
+      "sort_order": 29,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "GENERAL PROPERTY SAFETY",
+      "source_row": 7,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    },
+    {
+      "code": "CHK-030",
+      "group": "General Property Safety",
+      "question": "Cleanliness of communal areas",
+      "sort_order": 30,
+      "response_options": [
+        "Pass",
+        "Issue",
+        "Not applicable",
+        "Not checked"
+      ],
+      "default_response": null,
+      "access_tier": "INTERNAL",
+      "source_sheet": "GENERAL PROPERTY SAFETY",
+      "source_row": 8,
+      "source_checked_value": false,
+      "source_notes": "Original source checkbox false is uncompleted, not a failed observation."
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+# Dependencies and build output
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Databases and user-submitted evidence
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+storage/
+uploads/
+data/private/
+*.bak
+
+# Runtime
+*.log
+logs/
+tmp/
+.temp/
+
+# Editor and OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
