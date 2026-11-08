@@ -10,7 +10,15 @@ import { DATA_DIR, DB_FILE, DIST_DIR, HOST, OUTBOX_DIR, PORT, UPLOADS_DIR } from
 fs.mkdirSync(DATA_DIR, { recursive: true });
 const db = openDb(DB_FILE);
 ensureReferenceData(db);
-if (seedDemo(db, UPLOADS_DIR, londonToday(new Date()))) console.log('Seeded fictional demo data (2 Areas, 10 Sites).');
+// Portable clean mode must never silently populate operational records with demo properties.
+// Source-development default retains the existing demo experience; the Windows portable
+// launcher explicitly sets PH_DEMO_DATA=0 for real work, or =1 for a separate demo folder.
+if (process.env.PH_DEMO_DATA !== '0') {
+  if (seedDemo(db, UPLOADS_DIR, londonToday(new Date()))) console.log('Seeded fictional demo data (2 Areas, 10 Sites).');
+} else {
+  const count = (db.prepare('SELECT COUNT(*) AS count FROM sites').get() as { count: number }).count;
+  if (count === 0) console.log('Clean start: no demonstration properties have been added.');
+}
 
 const app = createApp({ db, uploadsDir: UPLOADS_DIR, outboxDir: OUTBOX_DIR });
 

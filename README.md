@@ -40,6 +40,14 @@ An existing P0 database upgrades automatically: migration 2 is additive. The ser
 
 `PH_DATA_DIR` and `PORT` override the data folder and port. For `npm run e2e`, `CHROME_PATH` points it at a Chrome or Edge executable; installed Chrome, Edge or Chromium are found automatically. Screenshots, downloaded CSVs and `results.txt` are written to `e2e/output/`. A curated set is kept in [docs/screenshots](docs/screenshots), and the latest run is in [docs/e2e-results.txt](docs/e2e-results.txt).
 
+## Portable Windows ZIP (no admin rights on target)
+
+For a self-contained Windows x64 edition with bundled Node runtime, a **clean operational launcher**, a separate fictional Demo launcher and local Backup/Restore shortcuts, see [Portable Windows handover](docs/PORTABLE_WINDOWS.md).
+
+Build from a Windows x64 developer machine with `powershell -NoProfile -File portable/build-windows.ps1`. On the **target laptop**, simply extract the ZIP and double-click `START Property Hub.cmd`: no Node/npm installation, no elevated rights and no network service. Corporate execution policies may still require IT approval.
+
+Portable operational records live in `%LOCALAPPDATA%\PropertyHub\data` **outside** the extracted app folder; demo records use `%LOCALAPPDATA%\PropertyHub\demo-data`. Keep live data and backups out of Git. Do not import real sensitive accommodation data before work-device approval.
+
 ## What's built
 
 ### P0: core compliance
