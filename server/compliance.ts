@@ -12,6 +12,14 @@ export interface EvidenceInput {
   validUntil: string | null;
 }
 
+export interface VisitInput {
+  ref: string;
+  /** Visit lifecycle: complete | complete_remedials | awaiting_evidence | closed */
+  status: string;
+  openRemedials: number;
+  closedOn: string | null;
+}
+
 export interface ActivityInput {
   applicability: Applicability;
   naReason: string;
@@ -20,12 +28,14 @@ export interface ActivityInput {
   expiresOn: string | null;
   intervalMonths: number | null;
   evidenceRequired: boolean;
-  /** Evidence documents linked directly to the activity, or null when none are linked. */
+  /** Current-cycle evidence (documents of the visit that set the schedule, or activity documents for legacy schedules). */
   evidence: EvidenceInput | null;
   openCriticalActions: number;
   warningDays: number;
-  /** Latest effective compliance check for the current cycle, if one was recorded. */
-  latestCheck?: { ref: string; performedOn: string; outcome: string } | null;
+  /** The completed visit that set the current schedule (V2). Null for schedules entered manually or before v0.5. */
+  visit?: VisitInput | null;
+  /** A visit currently Scheduled / In Progress (work not yet recorded), if any. */
+  inProgressRef?: string | null;
 }
 
 export interface ActivityResult {
@@ -43,33 +53,31 @@ export const STATUS_LABEL: Record<Status, string> = {
   na: 'Not applicable',
 };
 
+const uk = (iso: string) => iso.slice(0, 10).split('-').reverse().join('/');
+
 /**
- * Precedence (most serious first) — v0.3 workflow D:
- *  1. Applicability unknown -> grey; N/A -> na (excluded from compliance rate).
- *  2. Open Critical action linked to the activity -> red.
- *  2b. Latest recorded compliance check for the current cycle was Unsatisfactory -> red.
+ * Activity (obligation) status. Distinct from a visit's status, but uses the visit that set the
+ * current schedule as the evidence of compliance. Precedence (most serious first):
+ *  1. Applicability unknown -> grey; N/A -> na.
+ *  2. Open Critical remedial linked to the activity -> red.
  *  3. No usable due date -> grey.
- *  4. Effective due date (earliest of next due [or last done + interval] / expiry /
- *     verified evidence valid-until) before today -> red.
- *     Due today is NOT overdue; overdue begins the following calendar day.
- *  5. Evidence required but missing or not operator-verified -> grey
- *     ("missing required verified evidence => unknown if otherwise not red").
- *  6. Within warning window (0..warningDays inclusive) -> amber.
- *  7. Otherwise green.
- * Uploading a file alone can never produce green: it must be explicitly verified.
- * The due date is still reported for grey items so reminders are never hidden.
+ *  4. Effective due date (next due / expiry / verified evidence valid-until) before today -> red.
+ *     Due today is NOT overdue; overdue begins the following calendar day. No visit state can
+ *     override an expired obligation.
+ *  5. The visit that set the schedule is not Closed:
+ *       complete with remedials outstanding -> amber; awaiting required evidence -> grey;
+ *       complete but not yet closed -> amber.
+ *  6. Schedules without a visit: evidence required but missing / unverified -> grey.
+ *  7. Within warning window (0..warningDays inclusive) -> amber.
+ *  8. Otherwise green ("Compliant / verified" when backed by a closed visit).
+ * Uploading a file alone never produces green: it must be explicitly verified.
  */
 export function evaluateActivity(input: ActivityInput, today: string): ActivityResult {
   if (input.applicability === 'unknown') {
     return { status: 'grey', daysToDue: null, dueOn: null, reason: 'Applicability not decided' };
   }
   if (input.applicability === 'not_applicable') {
-    return {
-      status: 'na',
-      daysToDue: null,
-      dueOn: null,
-      reason: `Not applicable: ${input.naReason?.trim() || '(no reason recorded)'}`,
-    };
+    return { status: 'na', daysToDue: null, dueOn: null, reason: `Not applicable: ${input.naReason?.trim() || '(no reason recorded)'}` };
   }
 
   const fromSchedule =
@@ -79,30 +87,40 @@ export function evaluateActivity(input: ActivityInput, today: string): ActivityR
   const due = minDate(fromSchedule, input.expiresOn, evidenceExpiry);
   const days = due ? daysBetween(today, due) : null;
   const dueIsExpiry = !!due && due !== fromSchedule;
+  const pending = input.inProgressRef ? ` (visit ${input.inProgressRef} in progress, not yet completed)` : '';
 
   if (input.openCriticalActions > 0) {
     const n = input.openCriticalActions;
-    return { status: 'red', daysToDue: days, dueOn: due, reason: `Critical open action${n > 1 ? `s (${n})` : ''} recorded` };
-  }
-  if (input.latestCheck?.outcome === 'Unsatisfactory') {
-    const d = input.latestCheck.performedOn.split('-').reverse().join('/');
-    return { status: 'red', daysToDue: days, dueOn: due, reason: `Latest check ${input.latestCheck.ref} (${d}) was unsatisfactory` };
+    return { status: 'red', daysToDue: days, dueOn: due, reason: `Critical open remedial${n > 1 ? `s (${n})` : ''} recorded` };
   }
   if (due === null || days === null) {
-    return { status: 'grey', daysToDue: null, dueOn: null, reason: 'No next due date or last-done date + interval recorded' };
+    return { status: 'grey', daysToDue: null, dueOn: null, reason: `No schedule yet: record an inspection or set the last inspection date${pending}` };
   }
   if (days < 0) {
     const n = -days;
-    return { status: 'red', daysToDue: days, dueOn: due, reason: `${dueIsExpiry ? 'Expired' : 'Overdue'} by ${n} day${n === 1 ? '' : 's'}` };
+    return { status: 'red', daysToDue: days, dueOn: due, reason: `${dueIsExpiry ? 'Expired' : 'Overdue'} by ${n} day${n === 1 ? '' : 's'}${pending}` };
   }
 
   const dueText = days === 0 ? 'due today' : `due in ${days} day${days === 1 ? '' : 's'}`;
-  if (input.evidenceRequired && !input.evidence?.verified) {
+  const v = input.visit;
+  if (v && v.status !== 'closed') {
+    if (v.status === 'complete_remedials') {
+      return { status: 'amber', daysToDue: days, dueOn: due, reason: `Inspection ${v.ref} complete with remedials outstanding (${v.openRemedials})` };
+    }
+    if (v.status === 'awaiting_evidence') {
+      return { status: 'grey', daysToDue: days, dueOn: due, reason: `Awaiting required evidence for inspection ${v.ref}` };
+    }
+    return { status: 'amber', daysToDue: days, dueOn: due, reason: `Inspection ${v.ref} complete, not yet closed` };
+  }
+  if (!v && input.evidenceRequired && !input.evidence?.verified) {
     const what = input.evidence ? 'Evidence not reviewed/verified' : 'Required evidence missing for the current cycle';
-    return { status: 'grey', daysToDue: days, dueOn: due, reason: `${what} (${dueText})` };
+    return { status: 'grey', daysToDue: days, dueOn: due, reason: `${what} (${dueText})${pending}` };
   }
   if (days <= input.warningDays) {
-    return { status: 'amber', daysToDue: days, dueOn: due, reason: dueText.charAt(0).toUpperCase() + dueText.slice(1) };
+    return { status: 'amber', daysToDue: days, dueOn: due, reason: `${dueText.charAt(0).toUpperCase() + dueText.slice(1)}${pending}` };
+  }
+  if (v) {
+    return { status: 'green', daysToDue: days, dueOn: due, reason: `Compliant / verified: ${v.ref} closed ${v.closedOn ? uk(v.closedOn) : ''} (${days} days to next due)` };
   }
   return { status: 'green', daysToDue: days, dueOn: due, reason: `In date (${days} days remaining)` };
 }

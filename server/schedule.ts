@@ -26,7 +26,7 @@ export function effectiveNextDue(s: ScheduleInput): { next_due_on: string | null
   return { next_due_on: s.next_due_override ? s.override_date : derived, derived };
 }
 
-export type ScheduleSource = 'edit' | 'check' | 'amendment' | 'type-interval' | 'migration';
+export type ScheduleSource = 'edit' | 'visit' | 'visit-reopen' | 'type-interval' | 'migration';
 
 export interface ScheduleState {
   last_done_on: string | null;
@@ -36,15 +36,15 @@ export interface ScheduleState {
 }
 
 /** Writes a traceable schedule change entry when anything actually changed. */
-export function logScheduleChange(db: DB, activityId: number, before: ScheduleState, after: ScheduleState, source: ScheduleSource, at: string, checkId: number | null = null, note = '') {
+export function logScheduleChange(db: DB, activityId: number, before: ScheduleState, after: ScheduleState, source: ScheduleSource, at: string, visitId: number | null = null, note = '') {
   const same = before.last_done_on === after.last_done_on && before.next_due_on === after.next_due_on &&
     !!before.next_due_override === !!after.next_due_override && (before.next_due_override_reason ?? '') === (after.next_due_override_reason ?? '');
   // Recorded checks/amendments always leave a trace (they set the schedule even when dates coincide).
-  if (same && source !== 'check' && source !== 'amendment') return;
+  if (same && source !== 'visit' && source !== 'visit-reopen') return;
   db.prepare(
-    `INSERT INTO activity_schedule_log (activity_id, changed_at, source, check_id, old_last_done, new_last_done, old_next_due, new_next_due, old_override, new_override, note)
+    `INSERT INTO activity_schedule_log (activity_id, changed_at, source, visit_id, old_last_done, new_last_done, old_next_due, new_next_due, old_override, new_override, note)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(activityId, at, source, checkId, before.last_done_on, after.last_done_on, before.next_due_on, after.next_due_on,
+  ).run(activityId, at, source, visitId, before.last_done_on, after.last_done_on, before.next_due_on, after.next_due_on,
     before.next_due_override ? 1 : 0, after.next_due_override ? 1 : 0, note);
 }
 

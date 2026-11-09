@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, type Core, type Row } from '../api';
 import { Card, DataTable, DocumentsPanel, ErrorBox, Field, Loading, Modal, Page, StatusChip, Tabs } from '../components';
 import { addMonths, fmtDate, hashParams, LEVEL_LABEL, navigate, useLoad } from '../util';
-import { ACTION_COLS, ActionModal } from './Actions';
-import { ActivityHistory } from './Checks';
+import { REMEDIAL_COLS } from './Actions';
+import { ActivityHistory, VisitStatusTag } from './Visits';
 
 function Crumbs({ a }: { a: Row }) {
   return (
@@ -39,15 +39,18 @@ export function ActivityDetail({ id }: { id: number }) {
       title={<>{a.ref} · {a.type_name}{a.name ? ` — ${a.name}` : ''} {a.archived_at && <span className="chip chip-none">Archived</span>}</>}
       actions={
         <>
-          {!a.archived_at && <a className="btn btn-primary btn-lg" href={`#/activities/${id}/check`}>Record Inspection / Check</a>}
+          {!a.archived_at && a.applicability !== 'not_applicable' && (a.open_visit_id
+            ? <a className="btn btn-primary btn-lg" href={`#/visits/${a.open_visit_id}`}>Open inspection {a.open_visit_ref}</a>
+            : <button className="btn-primary btn-lg" onClick={async () => {
+              setErr(null);
+              try { const v = await api.post('/api/visits', { activity_id: id, inspector_user_id: a.owner_user_id }); navigate(`#/visits/${v.id}`); } catch (e: any) { setErr(e.message); }
+            }}>Start inspection / visit</button>)}
           <a className="btn" href={`#/activities/${id}/edit`}>Edit</a>
           <button onClick={archive}>{a.archived_at ? 'Restore' : 'Archive'}</button>
         </>
       }
     >
       <ErrorBox error={err} />
-      {flash === 'recorded' && <div className="note ok-note">Inspection / check recorded and the schedule updated. <strong>Changes pending</strong> — click Recalculate Compliance to update the status.</div>}
-      {flash === 'amended' && <div className="note ok-note">Amendment recorded. The original record is kept and marked as superseded. Click Recalculate Compliance to update the status.</div>}
       {flash === 'saved' && <div className="note ok-note">Saved. <strong>Changes pending</strong> — the status updates when you click Recalculate Compliance.</div>}
       <Tabs
         active={tab}
@@ -56,15 +59,15 @@ export function ActivityDetail({ id }: { id: number }) {
           { key: 'overview', label: 'Overview & Schedule' },
           { key: 'equipment', label: 'Linked Equipment', count: a.equipment.length },
           { key: 'documents', label: 'Documents', count: a.doc_count },
-          { key: 'history', label: 'Inspection & Check History', count: a.check_count },
-          { key: 'actions', label: 'Actions', count: a.actions.length },
+          { key: 'history', label: 'Inspection History', count: a.visit_count },
+          { key: 'actions', label: 'Remedials', count: a.actions.length },
         ]}
       />
       {tab === 'overview' && <Overview a={a} />}
       {tab === 'equipment' && <LinkedEquipment a={a} onChange={reload} />}
       {tab === 'documents' && <DocumentsPanel kind="activity" id={id} title="Evidence documents" />}
       {tab === 'history' && <ActivityHistory a={a} />}
-      {tab === 'actions' && <ActivityActions a={a} onChange={reload} />}
+      {tab === 'actions' && <ActivityRemedials a={a} />}
     </Page>
   );
 }
@@ -78,15 +81,19 @@ function Overview({ a }: { a: Row }) {
     ['Location', [a.area_code, a.site_code, a.room_code].filter(Boolean).join(' › ')],
     ['Responsible', a.owner_name ? `${a.owner_name}${a.owner_email ? ` <${a.owner_email}>` : ' (no email)'}` : '—'],
     ['Applicability', a.applicability === 'not_applicable' ? `Not applicable — ${a.na_reason || 'no reason'}` : a.applicability === 'unknown' ? 'Unknown' : 'Required'],
-    ['Last inspection / check', <>{fmtDate(a.last_done_on)}{a.latest_check && <span className="muted small"> · latest record {a.latest_check.ref} ({a.latest_check.outcome})</span>}</>],
-    ['Interval', interval ? `${interval} months${a.interval_months ? '' : ' (type default)'}` : '—'],
-    ['Next due', a.next_due_override
-      ? <><strong>{fmtDate(a.next_due_on)}</strong> <span className="override-tag">Override</span><div className="muted small">{a.next_due_override_reason}{a.derived_next_due ? ` · calculated would be ${fmtDate(a.derived_next_due)}` : ''}</div></>
-      : <><strong>{fmtDate(a.next_due_on)}</strong>{a.next_due_on && <span className="muted small"> · calculated: last done + {interval} months</span>}</>],
-    ['Expires', fmtDate(a.expires_on)],
-    ['Evidence required', a.evidence_required ? 'Yes — verified document needed' : 'No'],
-    ['Evidence', `${a.doc_count} linked, ${a.verified_doc_count} verified`],
+    ['Checklist', a.checklist_name ? <>{a.checklist_name} <span className="muted small">v{a.checklist_version}{a.checklist_active ? '' : ' (archived)'}</span></> : <span className="muted">None (visits record outcome, notes and evidence only)</span>],
+    ['Evidence / certificate', a.evidence_required ? 'Required: an inspection closes only with a linked, verified document' : 'Not required for this type'],
     ['Notes', a.notes || '—'],
+  ];
+  const sched: [string, React.ReactNode][] = [
+    ['Last work performed', <>{fmtDate(a.last_done_on)}{a.schedule_visit_ref && <span className="muted small"> · from {a.schedule_visit_ref} <VisitStatusTag s={a.schedule_visit_status} /></span>}{a.last_done_on && !a.schedule_visit_ref && <span className="muted small"> · entered manually</span>}</>],
+    ['Last inspection closed', a.last_closed_at ? fmtDate(a.last_closed_at) : '—'],
+    ['Inspection interval', interval ? `${interval} months${a.interval_months ? '' : ' (type default)'}` : '—'],
+    ['Calculated next due', a.derived_next_due ? <>{fmtDate(a.derived_next_due)} <span className="muted small">(last work + {interval} months)</span></> : '—'],
+    ['Next-due override', a.next_due_override ? <><strong>{fmtDate(a.next_due_on)}</strong> <span className="override-tag">Override</span><div className="muted small">{a.next_due_override_reason}</div></> : 'None'],
+    ['Effective next due', <strong>{fmtDate(a.next_due_on)}</strong>],
+    ['Certificate / contract expiry', fmtDate(a.expires_on)],
+    ['Latest visit', a.latest_visit_ref ? <><a href={`#/visits/${a.latest_visit_id}`}>{a.latest_visit_ref}</a> <VisitStatusTag s={a.latest_visit_status} /></> : 'None yet'],
   ];
   return (
     <div className="grid2">
@@ -95,12 +102,18 @@ function Overview({ a }: { a: Row }) {
         <p>{a.status ? a.status_reason : 'Not yet calculated — click Recalculate Compliance.'}</p>
         {a.status && <p className="muted small">Due date used in this snapshot {fmtDate(a.snap_due_on)} · days to due {a.days_to_due ?? '—'}</p>}
         {stale && <div className="note">The schedule now says next due <strong>{fmtDate(a.next_due_on)}</strong>. Click <strong>Recalculate Compliance</strong> to update this status.</div>}
-        <p className="muted small">Status only changes when you click Recalculate. Edits since the last run are shown as "Changes pending" in the header.</p>
+        <p className="muted small">Compliance status (is the obligation met?) is separate from inspection status (was the work done and closed?). It only changes when you click Recalculate.</p>
       </Card>
-      <Card title="Overview & schedule">
+      <Card title="Schedule">
+        <dl className="dl">
+          {sched.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
+        </dl>
+      </Card>
+      <Card title="Activity definition">
         <dl className="dl">
           {rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
         </dl>
+        <p className="muted small"><a href={`#/activities/${a.id}/edit`}>Edit the activity definition</a> (Admin) to change checklist, interval, location or responsibility.</p>
       </Card>
     </div>
   );
@@ -194,19 +207,11 @@ export function EquipmentPicker({ level, locationId, exclude, onClose, onPick }:
   );
 }
 
-function ActivityActions({ a, onChange }: { a: Row; onChange: () => void }) {
-  const [adding, setAdding] = useState(false);
+function ActivityRemedials({ a }: { a: Row }) {
   return (
-    <Card title="Remedial actions" actions={<button onClick={() => setAdding(true)}>+ New action</button>}>
-      <DataTable cols={ACTION_COLS} rows={a.actions} onRowClick={(x) => navigate(`#/actions/${x.id}`)} empty="No actions linked to this activity" />
-      <p className="muted small">An open Critical action turns this activity red at the <strong>next</strong> Recalculate. Closing it clears that effect at the following Recalculate.</p>
-      {adding && (
-        <ActionModal
-          context={{ activity_id: a.id, site_id: a.site_id, room_id: a.location_level === 'room' ? a.room_id : null, owner_user_id: a.owner_user_id }}
-          onClose={() => setAdding(false)}
-          onSaved={() => { setAdding(false); onChange(); }}
-        />
-      )}
+    <Card title="Remedials from this activity's inspections">
+      <DataTable cols={REMEDIAL_COLS.filter((c) => c.key !== 'activity_ref')} rows={a.actions} onRowClick={(x) => navigate(`#/remedials/${x.id}`)} empty="No remedials" />
+      <p className="muted small">Remedials are raised on an inspection / visit. An open Critical remedial turns this activity red at the <strong>next</strong> Recalculate.</p>
     </Card>
   );
 }
@@ -247,10 +252,11 @@ function ScheduleFields({ f, setF, typeInterval }: { f: Row; setF: (f: Row) => v
 export function ActivityForm({ id }: { id?: number }) {
   const { data: core } = useLoad<Core>('/api/core');
   const { data: cur } = useLoad<Row>(id ? `/api/activities/${id}` : null);
+  const { data: checklists } = useLoad<Row[]>('/api/checklists');
   const [f, setF] = useState<Row>({
     type_id: '', location_level: 'site', area: '', site: '', room: '', name: '', ref: '', owner_user_id: '',
     last_done_on: '', next_due_on: '', expires_on: '', interval_months: '', applicability: 'required', na_reason: '', notes: '',
-    next_due_override: false, next_due_override_reason: '',
+    next_due_override: false, next_due_override_reason: '', checklist_template_id: '',
   });
   const [equip, setEquip] = useState<Set<number>>(new Set());
   const [file, setFile] = useState<File | null>(null);
@@ -265,6 +271,7 @@ export function ActivityForm({ id }: { id?: number }) {
       next_due_on: cur.next_due_override ? (cur.next_due_on ?? '') : '',
       expires_on: cur.expires_on ?? '', interval_months: cur.interval_months ?? '', applicability: cur.applicability, na_reason: cur.na_reason, notes: cur.notes,
       next_due_override: !!cur.next_due_override, next_due_override_reason: cur.next_due_override ? cur.next_due_override_reason : '',
+      checklist_template_id: String(cur.checklist_template_id ?? ''),
     });
   }, [cur]);
 
@@ -291,6 +298,7 @@ export function ActivityForm({ id }: { id?: number }) {
         last_done_on: f.last_done_on || null, expires_on: f.expires_on || null,
         next_due_override: !!f.next_due_override, next_due_on: f.next_due_override ? f.next_due_on : null,
         next_due_override_reason: f.next_due_override ? f.next_due_override_reason : '',
+        checklist_template_id: f.checklist_template_id || null,
         interval_months: f.interval_months === '' ? null : Number(f.interval_months), applicability: f.applicability, na_reason: f.na_reason, notes: f.notes,
         ...(id ? {} : { ref: f.ref || undefined, equipment_ids: [...equip] }),
       };
@@ -316,9 +324,16 @@ export function ActivityForm({ id }: { id?: number }) {
       <div className="grid2">
         <Card title="1. Compliance type">
           <Field label="Type">
-            <select aria-label="Compliance type" value={f.type_id} onChange={(e) => setF({ ...f, type_id: e.target.value })}>
+            <select aria-label="Compliance type" value={f.type_id} onChange={(e) => setF({ ...f, type_id: e.target.value, checklist_template_id: '' })}>
               <option value="">Choose…</option>
               {core.types.filter((t) => t.active || String(t.id) === f.type_id).map((t) => <option key={t.id} value={t.id}>{t.code} — {t.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Checklist used on visits" hint="Only checklists of this Compliance Type are offered (Admin › Checklists).">
+            <select aria-label="Activity checklist" value={f.checklist_template_id} onChange={(e) => setF({ ...f, checklist_template_id: e.target.value })}>
+              <option value="">— no checklist —</option>
+              {(checklists ?? []).filter((c) => String(c.compliance_type_id) === String(f.type_id) && (c.active || String(c.id) === f.checklist_template_id))
+                .map((c) => <option key={c.id} value={c.id}>{c.name} ({c.item_count} questions, v{c.version})</option>)}
             </select>
           </Field>
           {type && <p className="muted small">Default interval {type.suggested_interval_months ?? '—'} months · warning {type.warning_days} days · {type.evidence_required ? 'verified evidence required' : 'no evidence required'}</p>}

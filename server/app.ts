@@ -10,11 +10,11 @@ import { londonToday, optDate } from './dates.js';
 import { ACTIVITY_LOCATION_JOINS, latestRun, recalculate } from './recalculate.js';
 import { candidateEml, exportDrafts, isEmail, sendReminders, type CandidateRow } from './reminders.js';
 import { bad, bool01, errorMiddleware, h, HttpError, idParam, notFound, optInt, optStr, reqInt, reqStr } from './http.js';
-import { listInspections, registerInspections, type Ctx } from './inspections.js';
 import { listActions, registerActions } from './actions.js';
 import { sendCsv, toCsv } from './csv.js';
 import { derivedNextDue, effectiveInterval, effectiveNextDue, logScheduleChange, rederiveForType } from './schedule.js';
-import { listChecks, registerChecks } from './checks.js';
+import { listVisits, registerVisits, syncVisit, type Ctx } from './visits.js';
+import { registerChecklists } from './checklists.js';
 import { APP_VERSION } from './config.js';
 
 export interface AppOptions {
@@ -32,7 +32,7 @@ const LEVEL_TABLE: Record<Level, string> = { area: 'areas', site: 'sites', room:
 export const ENTITY_KINDS = ['area', 'site', 'room', 'equipment', 'activity', 'inspection', 'action'] as const;
 type EntityKind = (typeof ENTITY_KINDS)[number];
 const ENTITY_TABLE: Record<EntityKind, string> = {
-  area: 'areas', site: 'sites', room: 'rooms', equipment: 'equipment', activity: 'compliance_activities', inspection: 'inspection_runs', action: 'actions',
+  area: 'areas', site: 'sites', room: 'rooms', equipment: 'equipment', activity: 'compliance_activities', inspection: 'visits', action: 'actions',
 };
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -54,11 +54,11 @@ export function createApp(opts: AppOptions) {
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
 
-  // Any successful write that can affect compliance marks the snapshot stale. Exempt: recalculation itself,
-  // reminder handling, exports, and routine inspections (which never feed compliance status).
+  // Any successful write marks the status snapshot stale ("Changes pending"). Exempt: recalculation itself,
+  // reminder handling and exports. Only manual Recalculate changes RAG status.
   app.use('/api', (req, res, next) => {
     const mutating = req.method !== 'GET' && req.method !== 'HEAD';
-    const exempt = ['/recalculate', '/reminders', '/export', '/inspections'].some((p) => req.path.startsWith(p));
+    const exempt = ['/recalculate', '/reminders', '/export'].some((p) => req.path.startsWith(p));
     if (mutating && !exempt) {
       const json = res.json.bind(res);
       res.json = (body: unknown) => {
@@ -372,10 +372,16 @@ export function createApp(opts: AppOptions) {
               a.owner_user_id, u.name AS owner_name, u.email AS owner_email,
               a.last_done_on, a.next_due_on, a.expires_on, a.interval_months, t.suggested_interval_months AS type_interval,
               a.applicability, a.na_reason, a.notes, a.archived_at, a.updated_at,
-              a.next_due_override, a.next_due_override_reason, a.schedule_check_id,
-              (SELECT c.ref || '|' || c.performed_on || '|' || c.outcome FROM compliance_checks c
-                 WHERE c.activity_id = a.id AND c.superseded_by_id IS NULL ORDER BY c.performed_on DESC, c.id DESC LIMIT 1) AS latest_check,
-              (SELECT COUNT(*) FROM compliance_checks c WHERE c.activity_id = a.id AND c.superseded_by_id IS NULL) AS check_count,
+              a.next_due_override, a.next_due_override_reason, a.schedule_visit_id, a.checklist_template_id,
+              cl.name AS checklist_name, cl.version AS checklist_version, cl.active AS checklist_active,
+              sv.ref AS schedule_visit_ref, sv.status AS schedule_visit_status, sv.performed_on AS schedule_visit_performed, sv.closed_at AS schedule_visit_closed_at,
+              (SELECT MAX(v.closed_at) FROM visits v WHERE v.activity_id = a.id) AS last_closed_at,
+              (SELECT v.id FROM visits v WHERE v.activity_id = a.id AND v.status = 'in_progress' ORDER BY v.id DESC LIMIT 1) AS open_visit_id,
+              (SELECT v.ref FROM visits v WHERE v.activity_id = a.id AND v.status = 'in_progress' ORDER BY v.id DESC LIMIT 1) AS open_visit_ref,
+              (SELECT v.id FROM visits v WHERE v.activity_id = a.id ORDER BY COALESCE(v.performed_on, v.created_at) DESC, v.id DESC LIMIT 1) AS latest_visit_id,
+              (SELECT v.ref FROM visits v WHERE v.activity_id = a.id ORDER BY COALESCE(v.performed_on, v.created_at) DESC, v.id DESC LIMIT 1) AS latest_visit_ref,
+              (SELECT v.status FROM visits v WHERE v.activity_id = a.id ORDER BY COALESCE(v.performed_on, v.created_at) DESC, v.id DESC LIMIT 1) AS latest_visit_status,
+              (SELECT COUNT(*) FROM visits v WHERE v.activity_id = a.id) AS visit_count,
               (SELECT COUNT(*) FROM activity_equipment ae WHERE ae.activity_id = a.id) AS equipment_count,
               (SELECT GROUP_CONCAT(ae.equipment_id) FROM activity_equipment ae WHERE ae.activity_id = a.id) AS equipment_ids,
               (SELECT COUNT(*) FROM document_links l WHERE l.entity_kind = 'activity' AND l.entity_id = a.id) AS doc_count,
@@ -386,18 +392,18 @@ export function createApp(opts: AppOptions) {
        FROM compliance_activities a
        JOIN compliance_types t ON t.id = a.type_id
        LEFT JOIN users u ON u.id = a.owner_user_id
+       LEFT JOIN checklist_templates cl ON cl.id = a.checklist_template_id
+       LEFT JOIN visits sv ON sv.id = a.schedule_visit_id
        ${ACTIVITY_LOCATION_JOINS}
        LEFT JOIN activity_status_snapshots snap ON snap.activity_id = a.id AND snap.run_id = (SELECT MAX(id) FROM recalculation_runs)
        WHERE (${where}) ${includeArchived ? '' : 'AND a.archived_at IS NULL'}
        ORDER BY a.ref`,
       ...params,
     ).map((a): Row => {
-      const [ref, performed, outcome] = a.latest_check ? String(a.latest_check).split('|') : [];
       const interval = effectiveInterval(a.interval_months, a.type_interval);
       return {
         ...a,
         equipment_ids: a.equipment_ids ? String(a.equipment_ids).split(',').map(Number) : [],
-        latest_check: ref ? { ref, performed_on: performed, outcome } : null,
         effective_interval: interval,
         derived_next_due: derivedNextDue(a.last_done_on, interval),
       };
@@ -432,7 +438,15 @@ export function createApp(opts: AppOptions) {
     const typeInterval = (get('SELECT suggested_interval_months AS m FROM compliance_types WHERE id = ?', typeId) as Row).m as number | null;
     const sched = effectiveNextDue({ last_done_on: lastDone, interval_months: interval, type_interval: typeInterval, next_due_override: override, override_date: overrideDate });
     const reasonIn = b.next_due_override_reason !== undefined ? optStr(b.next_due_override_reason) : (cur?.next_due_override_reason ?? '');
+    const checklistId = b.checklist_template_id !== undefined ? optInt(b.checklist_template_id, 'Checklist') : (cur?.checklist_template_id ?? null);
+    if (checklistId !== null) {
+      const cl = get('SELECT * FROM checklist_templates WHERE id = ?', checklistId);
+      if (!cl) throw notFound('Checklist');
+      if (cl.compliance_type_id !== typeId) throw bad(`Checklist "${cl.name}" belongs to a different Compliance Type`);
+      if (!cl.active && checklistId !== cur?.checklist_template_id) throw bad(`Checklist "${cl.name}" is archived`);
+    }
     return {
+      checklist_template_id: checklistId,
       type_id: typeId, location_level: level,
       area_id: level === 'area' ? locId : null, site_id: level === 'site' ? locId : null, room_id: level === 'room' ? locId : null,
       owner_user_id: ownerId,
@@ -483,9 +497,9 @@ export function createApp(opts: AppOptions) {
     const id = db.transaction(() => {
       const newId = Number(run(
         `INSERT INTO compliance_activities (ref, type_id, name, location_level, area_id, site_id, room_id, owner_user_id, last_done_on, next_due_on,
-           next_due_override, next_due_override_reason, expires_on, interval_months, applicability, na_reason, notes, created_at, updated_at)
+           next_due_override, next_due_override_reason, checklist_template_id, expires_on, interval_months, applicability, na_reason, notes, created_at, updated_at)
          VALUES (@ref, @type_id, @name, @location_level, @area_id, @site_id, @room_id, @owner_user_id, @last_done_on, @next_due_on,
-           @next_due_override, @next_due_override_reason, @expires_on, @interval_months, @applicability, @na_reason, @notes, @ts, @ts)`,
+           @next_due_override, @next_due_override_reason, @checklist_template_id, @expires_on, @interval_months, @applicability, @na_reason, @notes, @ts, @ts)`,
         { ...f, ref: optStr(b.ref) || nextCode('compliance_activities', 'ref', 'PH-C'), ts: ts() },
       ).lastInsertRowid);
       if (Array.isArray(b.equipment_ids) && b.equipment_ids.length) linkEquipment(newId, b.equipment_ids);
@@ -498,14 +512,14 @@ export function createApp(opts: AppOptions) {
     const cur = must('SELECT * FROM compliance_activities WHERE id = ?', id, 'Activity');
     const f = activityFields(req.body ?? {}, cur);
     db.transaction(() => {
-      // A manual change of the last-done date means the schedule no longer comes from a recorded check.
-      const scheduleCheck = f.last_done_on === cur.last_done_on ? cur.schedule_check_id : null;
+      // A manual change of the last-done date means the schedule no longer comes from a recorded visit.
+      const scheduleVisit = f.last_done_on === cur.last_done_on ? cur.schedule_visit_id : null;
       run(`UPDATE compliance_activities SET type_id = @type_id, name = @name, location_level = @location_level, area_id = @area_id, site_id = @site_id,
              room_id = @room_id, owner_user_id = @owner_user_id, last_done_on = @last_done_on, next_due_on = @next_due_on,
              next_due_override = @next_due_override, next_due_override_reason = @next_due_override_reason, expires_on = @expires_on,
              interval_months = @interval_months, applicability = @applicability, na_reason = @na_reason, notes = @notes,
-             schedule_check_id = @schedule_check_id, updated_at = @ts
-           WHERE id = @id`, { ...f, id, ts: ts(), schedule_check_id: scheduleCheck });
+             checklist_template_id = @checklist_template_id, schedule_visit_id = @schedule_visit_id, updated_at = @ts
+           WHERE id = @id`, { ...f, id, ts: ts(), schedule_visit_id: scheduleVisit });
       logScheduleChange(db, id, cur as any, f as any, 'edit', ts(), null, optStr(req.body?.change_note));
     })();
     res.json(activityDetail(id));
@@ -531,8 +545,8 @@ export function createApp(opts: AppOptions) {
   app.get('/api/activities/:id/history', h((req, res) => {
     const id = idParam(req);
     res.json({
-      checks: listChecks(db, 'c.activity_id = ?', [id]),
-      schedule: all(`SELECT l.*, c.ref AS check_ref FROM activity_schedule_log l LEFT JOIN compliance_checks c ON c.id = l.check_id
+      visits: listVisits(db, 'v.activity_id = ?', [id]),
+      schedule: all(`SELECT l.*, v.ref AS visit_ref FROM activity_schedule_log l LEFT JOIN visits v ON v.id = l.visit_id
         WHERE l.activity_id = ? ORDER BY l.changed_at DESC, l.id DESC`, id),
       snapshots: all(`SELECT s.*, r.created_at AS run_at, r.as_of_date FROM activity_status_snapshots s JOIN recalculation_runs r ON r.id = s.run_id
         WHERE s.activity_id = ? ORDER BY s.run_id DESC LIMIT 500`, id),
@@ -582,7 +596,7 @@ export function createApp(opts: AppOptions) {
       }
     }
     const today = londonToday(now());
-    const inspections = kind === 'area' ? listInspections(db, 's.area_id = ?', [id]) : kind === 'site' ? listInspections(db, 'i.site_id = ?', [id]) : listInspections(db, 'i.room_id = ?', [id]);
+    const inspections = kind === 'area' ? listVisits(db, 'ar.id = ?', [id]) : kind === 'site' ? listVisits(db, 's.id = ?', [id]) : listVisits(db, 'r.id = ?', [id]);
     const actions = kind === 'area' ? listActions(db, today, 'ar.id = ?', [id]) : kind === 'site' ? listActions(db, today, 'x.site_id = ?', [id]) : listActions(db, today, 'x.room_id = ?', [id]);
     res.json({ kind, entity, breadcrumb, activities: direct, inherited, children, equipment, relatedDocuments: related, inspections, actions, today });
   }));
@@ -598,7 +612,7 @@ export function createApp(opts: AppOptions) {
     if (kind === 'equipment') { const x = r('SELECT asset_code, description FROM equipment WHERE id = ?'); if (x) { label = `${x.asset_code} ${x.description}`; href = `#/equipment/${id}`; } }
     if (kind === 'activity') { const x = r('SELECT a.ref, t.name FROM compliance_activities a JOIN compliance_types t ON t.id = a.type_id WHERE a.id = ?'); if (x) { label = `${x.ref} ${x.name}`; href = `#/activities/${id}`; } }
     if (kind === 'action') { const x = r('SELECT ref, title FROM actions WHERE id = ?'); if (x) { label = `${x.ref} ${x.title}`; href = `#/actions/${id}`; } }
-    if (kind === 'inspection') { const x = r('SELECT i.ref, i.inspected_on, s.code AS sc FROM inspection_runs i JOIN sites s ON s.id = i.site_id WHERE i.id = ?'); if (x) { label = `${x.ref} inspection ${x.sc} ${x.inspected_on.split('-').reverse().join('/')}`; href = `#/inspections/${id}`; } }
+    if (kind === 'inspection') { const x = r('SELECT v.ref, v.performed_on, v.checklist_name FROM visits v WHERE v.id = ?'); if (x) { label = `${x.ref} inspection ${x.performed_on ? x.performed_on.split('-').reverse().join('/') : ''}`.trim(); href = `#/visits/${id}`; } }
     return { kind, id, label, href };
   }
   const docLinks = (docId: number) =>
@@ -651,7 +665,10 @@ export function createApp(opts: AppOptions) {
           verified_by_operator, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
         optStr(b.display_name) || safeName, key, safeName, mime, file.size, sha, ts(), issued, validUntil, optStr(b.notes)).lastInsertRowid);
     }
-    if (target) addLink(docId, target.kind, target.id, optStr(b.link_role));
+    if (target) {
+      addLink(docId, target.kind, target.id, optStr(b.link_role));
+      if (target.kind === 'inspection') syncVisit(db, target.id, ts(), 'evidence');
+    }
     res.status(reused ? 200 : 201).json({ ...docWithLinks(get('SELECT * FROM documents WHERE id = ?', docId)!), reused });
   }));
   app.put('/api/documents/:id', h((req, res) => {
@@ -659,12 +676,24 @@ export function createApp(opts: AppOptions) {
     const cur = must('SELECT * FROM documents WHERE id = ?', id, 'Document');
     const b = req.body ?? {};
     const verified = b.verified_by_operator !== undefined ? bool01(b.verified_by_operator) : cur.verified_by_operator;
+    const visitIds = all("SELECT entity_id FROM document_links WHERE document_id = ? AND entity_kind = 'inspection'", id).map((x) => x.entity_id as number);
+    if (!verified && cur.verified_by_operator) {
+      const closed = visitIds.map((v) => get('SELECT ref, closed_at FROM visits WHERE id = ?', v)).find((v) => v?.closed_at);
+      if (closed) throw new HttpError(409, `This document is verified evidence for closed inspection ${closed.ref}. Reopen that inspection before un-verifying it.`);
+    }
     run('UPDATE documents SET display_name = ?, issued_on = ?, valid_until = ?, notes = ?, verified_by_operator = ?, verified_at = ? WHERE id = ?',
       b.display_name !== undefined ? reqStr(b.display_name, 'Title') : cur.display_name,
       b.issued_on !== undefined ? optDate(b.issued_on, 'Issued on') : cur.issued_on,
       b.valid_until !== undefined ? optDate(b.valid_until, 'Valid until') : cur.valid_until,
       b.notes !== undefined ? optStr(b.notes) : cur.notes,
       verified, verified ? (cur.verified_by_operator ? cur.verified_at : ts()) : null, id);
+    if (verified !== cur.verified_by_operator) {
+      for (const v of visitIds) {
+        db.prepare('INSERT INTO visit_events (visit_id, at, event, detail) VALUES (?, ?, ?, ?)')
+          .run(v, ts(), verified ? 'evidence_verified' : 'evidence_unverified', `DOC-${id} ${cur.display_name} marked ${verified ? 'Reviewed/Verified' : 'not verified'}`);
+        syncVisit(db, v, ts(), 'evidence');
+      }
+    }
     res.json(docWithLinks(get('SELECT * FROM documents WHERE id = ?', id)!));
   }));
   app.delete('/api/documents/:id', h((req, res) => {
@@ -692,12 +721,18 @@ export function createApp(opts: AppOptions) {
     must('SELECT id FROM documents WHERE id = ?', id, 'Document');
     const e = assertEntity(req.body?.entity_kind, req.body?.entity_id);
     addLink(id, e.kind, e.id, optStr(req.body?.link_role));
+    if (e.kind === 'inspection') syncVisit(db, e.id, ts(), 'evidence');
     res.status(201).json(docWithLinks(get('SELECT * FROM documents WHERE id = ?', id)!));
   }));
   app.delete('/api/document-links/:id', h((req, res) => {
     const id = idParam(req);
     const l = must('SELECT * FROM document_links WHERE id = ?', id, 'Document link');
+    if (l.entity_kind === 'inspection') {
+      const v = get('SELECT ref, closed_at FROM visits WHERE id = ?', l.entity_id);
+      if (v?.closed_at) throw new HttpError(409, `${v.ref} is closed; its evidence cannot be unlinked. Reopen the inspection deliberately first.`);
+    }
     run('DELETE FROM document_links WHERE id = ?', id);
+    if (l.entity_kind === 'inspection') syncVisit(db, l.entity_id, ts(), 'evidence');
     res.json(docWithLinks(get('SELECT * FROM documents WHERE id = ?', l.document_id)!));
   }));
   /** Lightweight list of every linkable record for pickers. */
@@ -708,9 +743,9 @@ export function createApp(opts: AppOptions) {
       ...all('SELECT r.id, r.code, r.name, s.code AS sc FROM rooms r JOIN sites s ON s.id = r.site_id ORDER BY r.code').map((x) => ({ kind: 'room', id: x.id, label: `${x.code} ${x.name} (${x.sc})` })),
       ...all('SELECT id, asset_code, description FROM equipment ORDER BY asset_code').map((x) => ({ kind: 'equipment', id: x.id, label: `${x.asset_code} ${x.description}` })),
       ...all('SELECT a.id, a.ref, t.name FROM compliance_activities a JOIN compliance_types t ON t.id = a.type_id WHERE a.archived_at IS NULL ORDER BY a.ref').map((x) => ({ kind: 'activity', id: x.id, label: `${x.ref} ${x.name}` })),
-      ...all('SELECT id, ref, title FROM actions ORDER BY id DESC').map((x) => ({ kind: 'action', id: x.id, label: `${x.ref} ${x.title}` })),
-      ...all('SELECT i.id, i.ref, i.inspected_on, s.code AS sc FROM inspection_runs i JOIN sites s ON s.id = i.site_id ORDER BY i.id DESC')
-        .map((x) => ({ kind: 'inspection', id: x.id, label: `${x.ref} inspection ${x.sc} ${x.inspected_on}` })),
+      ...all('SELECT id, ref, title FROM actions ORDER BY id DESC').map((x) => ({ kind: 'action', id: x.id, label: `${x.ref} remedial: ${x.title}` })),
+      ...all('SELECT v.id, v.ref, v.performed_on, a.ref AS ar FROM visits v LEFT JOIN compliance_activities a ON a.id = v.activity_id ORDER BY v.id DESC')
+        .map((x) => ({ kind: 'inspection', id: x.id, label: `${x.ref} inspection ${x.ar ?? ''} ${x.performed_on ?? ''}`.trim() })),
     ]);
   }));
 
@@ -718,9 +753,9 @@ export function createApp(opts: AppOptions) {
 
   // ---------- P1: inspections, actions, exports ----------
   const ctx: Ctx = { db, ts, today: () => londonToday(now()), nextCode };
-  registerInspections(app, ctx);
+  registerVisits(app, ctx);
   registerActions(app, ctx);
-  registerChecks(app, ctx);
+  registerChecklists(app, ctx);
 
   /** CSV of the caller's currently filtered Activities register, in the order given. */
   app.post('/api/export/activities', h((req, res) => {

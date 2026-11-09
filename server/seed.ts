@@ -12,6 +12,7 @@ export const TEMPLATE_PATH = fileURLToPath(new URL('../data/inspection_template_
 
 interface TemplateFile {
   template_code: string;
+  name?: string;
   version: string;
   question_count: number;
   questions: { code: string; group: string; question: string; sort_order: number; access_tier: string; source_sheet: string; source_row: number }[];
@@ -48,7 +49,41 @@ export function ensureReferenceData(db: DB): void {
     insType.run('GAS', 'Gas Safety', 12, note, now, now);
     insType.run('LEG', 'Legionella', 24, note, now, now);
     insType.run('EICR', 'Electrical Installation Condition Report (EICR)', 60, note, now, now);
+    ensureRoutineChecklists(db, t, now);
   })();
+}
+
+/** The five original question groups, in source order, as editable checklist templates. */
+export const ROUTINE_GROUPS: { code: string; group: string; name: string }[] = [
+  { code: 'RPI-FIRE', group: 'Fire Safety', name: 'Routine — Fire Safety' },
+  { code: 'RPI-SEC', group: 'Security', name: 'Routine — Security' },
+  { code: 'RPI-UTIL', group: 'Gas, Electrical & Utilities', name: 'Routine — Gas, Electrical & Utilities' },
+  { code: 'RPI-HWB', group: 'Health & Wellbeing Risks', name: 'Routine — Health & Wellbeing Risks' },
+  { code: 'RPI-GEN', group: 'General Property Safety', name: 'Routine — General Property Safety' },
+];
+
+/**
+ * Routine visual checks get their own configurable Compliance Type (no certificate requirement) and five
+ * checklist templates holding the original 30 questions verbatim. They are NOT mapped onto PAT/FRA/Gas/
+ * Legionella/EICR. Idempotent: existing templates (and any operator edits) are never overwritten.
+ */
+function ensureRoutineChecklists(db: DB, t: TemplateFile, now: string) {
+  db.prepare(
+    `INSERT OR IGNORE INTO compliance_types (code, name, suggested_interval_months, warning_days, evidence_required, active, notes, created_at, updated_at)
+     VALUES ('RPI', 'Routine Property Inspection (visual)', 1, 7, 0, 1, ?, ?, ?)`,
+  ).run('Routine visual walk-round checks. Not statutory certificates; no paperwork required by default. Interval is a placeholder.', now, now);
+  const typeId = (db.prepare("SELECT id FROM compliance_types WHERE code = 'RPI'").get() as { id: number }).id;
+  const insT = db.prepare(`INSERT OR IGNORE INTO checklist_templates (code, name, compliance_type_id, description, version, active, source, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 1, 1, ?, ?, ?)`);
+  const insI = db.prepare(`INSERT OR IGNORE INTO checklist_items (template_id, code, section, question, sort_order, mandatory, active, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, 1, 1, ?, ?)`);
+  for (const g of ROUTINE_GROUPS) {
+    const fresh = insT.run(g.code, g.name, typeId, `${g.group} questions from ${t.template_code} (${t.name ?? 'routine inspection'}), imported verbatim.`,
+      `${t.template_code} ${t.version}`, now, now).changes > 0;
+    if (!fresh) continue;
+    const tid = (db.prepare('SELECT id FROM checklist_templates WHERE code = ?').get(g.code) as { id: number }).id;
+    t.questions.filter((q) => q.group === g.group).forEach((q, i) => insI.run(tid, q.code, q.group, q.question, i + 1, now, now));
+  }
 }
 
 /** A tiny valid one-page PDF so seeded "certificates" open in a browser. */
@@ -128,8 +163,8 @@ export function seedDemo(db: DB, uploadsDir: string, today: string): boolean {
     );
     const docLink = db.prepare('INSERT INTO document_links (document_id, entity_kind, entity_id, link_role, created_at) VALUES (?, ?, ?, ?, ?)');
     const action = db.prepare(
-      `INSERT INTO actions (ref, activity_id, site_id, title, priority, owner_user_id, due_on, state, notes, created_at, updated_at)
-       VALUES ('PH-X' || printf('%03d', (SELECT COUNT(*) + 1 FROM actions)), ?, ?, ?, 'Critical', ?, ?, 'Open', 'Fictional demo action', ?, ?)`,
+      `INSERT INTO actions (ref, activity_id, visit_id, site_id, title, priority, owner_user_id, due_on, state, notes, created_at, updated_at)
+       VALUES ('PH-X' || printf('%03d', (SELECT COUNT(*) + 1 FROM actions)), ?, ?, ?, ?, 'Critical', ?, ?, 'Open', 'Fictional demo remedial', ?, ?)`,
     );
 
     // Scenario overrides keyed "siteNo/TYPE" (siteNo 1..10) to give a realistic RAG spread.
@@ -153,12 +188,7 @@ export function seedDemo(db: DB, uploadsDir: string, today: string): boolean {
       ['Lounge', [['Television', 'Portable appliance']]],
     ] as const;
 
-    let roomNo = 0, eqNo = 0, actNo = 0, checkNo = 0;
-    const check = db.prepare(
-      `INSERT INTO compliance_checks (ref, activity_id, performed_on, inspector_user_id, provider_name, outcome, notes, certificate_document_id,
-         interval_months_used, proposed_next_due, next_due_on, schedule_applied, recorded_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
-    );
+    let roomNo = 0, eqNo = 0, actNo = 0;
     const writeDoc = (label: string, issued: string | null, validUntil: string | null, verified: boolean) => {
       const key = `${crypto.randomUUID()}.pdf`;
       const bytes = dummyPdf(`${label} - demo certificate`);
@@ -219,15 +249,19 @@ export function seedDemo(db: DB, uploadsDir: string, today: string): boolean {
         if (docKind !== 'none' && due) {
           const did = writeDoc(`${ref} ${tcode} ${siteCode}`, last, due, docKind === 'verified');
           docLink.run(did, 'activity', aid, 'certificate', now);
-          // The historical check that produced this certificate and set the current schedule.
-          if (last) {
-            const cid = Number(check.run(`PH-K${String(++checkNo).padStart(3, '0')}`, aid, last, users[i <= 5 ? 1 : 2], tcode === 'GAS' ? 'Demo Gas Engineer Ltd (fictional)' : '',
-              'Satisfactory', 'Fictional demo check', did, t.m, due, due, now).lastInsertRowid);
-            db.prepare('UPDATE compliance_activities SET schedule_check_id = ? WHERE id = ?').run(cid, aid);
-          }
           if (tcode === 'FRA') docLink.run(did, 'site', siteId, 'evidence', now); // same file, second context
+          // The historical visit whose certificate this is; it set the current schedule.
+          if (last) {
+            const verified = docKind === 'verified';
+            const vid = seedVisit(db, {
+              activityId: aid, siteId, roomId: level === 'room' ? gasRoom.id : null, performed: last, inspector: users[i <= 5 ? 1 : 2],
+              provider: tcode === 'GAS' ? 'Demo Gas Engineer Ltd (fictional)' : '', nextDue: due!, now,
+              status: s.critical ? 'complete_remedials' : verified ? 'closed' : 'awaiting_evidence', outcome: s.critical ? 'complete_remedials' : 'complete',
+            });
+            docLink.run(did, 'inspection', vid, 'certificate', now);
+            if (s.critical) action.run(aid, vid, siteId, s.critical, owner, addDays(today, 7), now, now);
+          }
         }
-        if (s.critical) action.run(aid, siteId, s.critical, owner, addDays(today, 7), now, now);
       }
     }
 
@@ -241,38 +275,91 @@ export function seedDemo(db: DB, uploadsDir: string, today: string): boolean {
     docLink.run(did, 'activity', areaActId, 'evidence', now);
     docLink.run(did, 'area', areaIds[0], 'reference', now);
 
-    seedInspections(db, today, now, users);
+    seedRoutine(db, today, now, users, actNo);
     setSetting(db, 'recalculation_pending', 'false');
   })();
   return true;
 }
 
-/** Two fictional routine inspections: one completed (with an Issue and its remedial action), one draft in progress. */
-function seedInspections(db: DB, today: string, now: string, users: number[]) {
-  const qs = db.prepare('SELECT code FROM checklist_questions ORDER BY sort_order').all() as { code: string }[];
-  if (!qs.length) return;
-  const tmpl = db.prepare('SELECT template_code, template_version FROM checklist_questions LIMIT 1').get() as { template_code: string; template_version: string };
-  const site = (code: string) => (db.prepare('SELECT id FROM sites WHERE code = ?').get(code) as { id: number }).id;
-  const run = db.prepare(
-    `INSERT INTO inspection_runs (ref, site_id, room_id, inspected_on, state, completed_at, notes, inspector_user_id, inspector_name, template_code, template_version, created_at, updated_at)
-     VALUES (?, ?, NULL, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)`,
+interface SeedVisit {
+  activityId: number; siteId: number | null; roomId: number | null; performed: string; inspector: number; provider: string;
+  nextDue: string; now: string; status: string; outcome: string | null; checklistTemplateId?: number | null;
+}
+
+/** Inserts a completed (or in-progress) visit with a checklist snapshot and makes it the activity's schedule source. */
+function seedVisit(db: DB, v: SeedVisit): number {
+  let snap = '[]';
+  let tpl: { id: number; version: number; name: string } | undefined;
+  if (v.checklistTemplateId) {
+    tpl = db.prepare('SELECT id, version, name FROM checklist_templates WHERE id = ?').get(v.checklistTemplateId) as { id: number; version: number; name: string };
+    snap = JSON.stringify(db.prepare('SELECT code, section, question, sort_order, mandatory FROM checklist_items WHERE template_id = ? AND active = 1 ORDER BY sort_order')
+      .all(tpl.id));
+  }
+  const n = (db.prepare('SELECT COUNT(*) AS n FROM visits').get() as { n: number }).n + 1;
+  const completed = v.status !== 'in_progress';
+  const at = `${v.performed}T15:00:00.000Z`;
+  const id = Number(db.prepare(
+    `INSERT INTO visits (ref, activity_id, site_id, room_id, performed_on, inspector_user_id, provider_name, notes, checklist_template_id, checklist_version,
+       checklist_name, checklist_snapshot, status, outcome, completed_at, closed_at, next_due_set, schedule_applied, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'Fictional demo visit', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(`PH-V${String(n).padStart(3, '0')}`, v.activityId, v.siteId, v.roomId, v.performed, v.inspector, v.provider, tpl?.id ?? null, tpl?.version ?? null,
+    tpl?.name ?? '', snap, v.status, completed ? v.outcome : null, completed ? at : null, v.status === 'closed' ? at : null, completed ? v.nextDue : null,
+    completed ? 1 : 0, v.now, v.now).lastInsertRowid);
+  db.prepare('INSERT INTO visit_events (visit_id, at, event, detail) VALUES (?, ?, ?, ?)').run(id, v.now, 'seeded', 'Fictional demo record');
+  if (completed) db.prepare('UPDATE compliance_activities SET schedule_visit_id = ? WHERE id = ?').run(id, v.activityId);
+  return id;
+}
+
+/**
+ * Routine (visual) activities: every site gets Fire Safety (monthly) and General Property Safety (quarterly)
+ * on separate schedules; PH-S001/PH-S002 also get Security, Utilities and Health & Wellbeing. Demo visits show
+ * each lifecycle state: closed, complete with remedials, and in progress.
+ */
+function seedRoutine(db: DB, today: string, now: string, users: number[], startNo: number) {
+  const rpi = db.prepare("SELECT id FROM compliance_types WHERE code = 'RPI'").get() as { id: number } | undefined;
+  if (!rpi) return;
+  const tpl = (code: string) => (db.prepare('SELECT id FROM checklist_templates WHERE code = ?').get(code) as { id: number }).id;
+  const sites = db.prepare('SELECT id, code, area_id FROM sites ORDER BY code').all() as { id: number; code: string; area_id: number }[];
+  const ins = db.prepare(
+    `INSERT INTO compliance_activities (ref, type_id, name, location_level, site_id, owner_user_id, last_done_on, next_due_on, interval_months, applicability,
+       checklist_template_id, notes, created_at, updated_at) VALUES (?, ?, ?, 'site', ?, ?, ?, ?, ?, 'required', ?, '', ?, ?)`,
   );
-  const ans = db.prepare('INSERT INTO inspection_answers (run_id, question_code, response, notes) VALUES (?, ?, ?, ?)');
-
-  const done = Number(run.run('PH-I001', site('PH-S001'), addDays(today, -14), 'complete', now, 'Fictional demo inspection', users[1],
-    tmpl.template_code, tmpl.template_version, now, now).lastInsertRowid);
-  let issueAnswer = 0;
-  qs.forEach((q, i) => {
-    const response = i === 4 ? 'Issue' : i === 11 ? 'Not applicable' : 'Pass';
-    const id = Number(ans.run(done, q.code, response, i === 4 ? 'Wedge found holding a door open (demo)' : '').lastInsertRowid);
-    if (i === 4) issueAnswer = id;
+  let n = startNo;
+  const made: Record<string, number> = {};
+  sites.forEach((s, i) => {
+    const plan: [string, string, number, number][] = [['RPI-FIRE', 'Routine Fire Safety', 1, 10 + (i % 3) * 5], ['RPI-GEN', 'Routine General Property Safety', 3, 40 + i * 4]];
+    if (i < 2) plan.push(['RPI-SEC', 'Routine Security', 3, 50], ['RPI-UTIL', 'Routine Gas, Electrical & Utilities', 3, 60], ['RPI-HWB', 'Routine Health & Wellbeing', 3, 70]);
+    for (const [code, name, months, ago] of plan) {
+      const last = addDays(today, -ago);
+      const ref = `PH-C${String(++n).padStart(3, '0')}`;
+      const id = Number(ins.run(ref, rpi.id, `${name} - ${s.code}`, s.id, users[s.area_id === sites[0].area_id ? 1 : 2], last, addMonths(last, months), months, tpl(code), now, now).lastInsertRowid);
+      made[`${s.code}/${code}`] = id;
+    }
   });
-  db.prepare(
-    `INSERT INTO actions (ref, activity_id, inspection_answer_id, inspection_run_id, site_id, title, description, priority, owner_user_id, due_on, state, notes, created_at, updated_at)
-     VALUES ('PH-X' || printf('%03d', (SELECT COUNT(*) + 1 FROM actions)), NULL, ?, ?, ?, ?, ?, 'High', ?, ?, 'In progress', '', ?, ?)`,
-  ).run(issueAnswer, done, site('PH-S001'), 'Remove door wedge and brief staff (demo)', 'Raised from routine inspection PH-I001.', users[1], addDays(today, 7), now, now);
+  const ans = db.prepare('INSERT INTO visit_answers (visit_id, item_code, response, notes) VALUES (?, ?, ?, ?)');
+  const itemsOf = (code: string) => db.prepare('SELECT code FROM checklist_items WHERE template_id = ? ORDER BY sort_order').all(tpl(code)) as { code: string }[];
 
-  const draft = Number(run.run('PH-I002', site('PH-S002'), today, 'draft', null, 'Fictional draft inspection', users[1],
-    tmpl.template_code, tmpl.template_version, now, now).lastInsertRowid);
-  qs.slice(0, 12).forEach((q) => ans.run(draft, q.code, 'Pass', ''));
+  // PH-S001 Fire Safety: closed visit, all Pass.
+  const a1 = made['PH-S001/RPI-FIRE'];
+  const r1 = db.prepare('SELECT last_done_on, next_due_on FROM compliance_activities WHERE id = ?').get(a1) as { last_done_on: string; next_due_on: string };
+  const v1 = seedVisit(db, { activityId: a1, siteId: sites[0].id, roomId: null, performed: r1.last_done_on, inspector: users[1], provider: '', nextDue: r1.next_due_on, now,
+    status: 'closed', outcome: 'complete', checklistTemplateId: tpl('RPI-FIRE') });
+  for (const q of itemsOf('RPI-FIRE')) ans.run(v1, q.code, 'Pass', '');
+
+  // PH-S001 General Property Safety: complete with one remedial In progress (trip hazard).
+  const a2 = made['PH-S001/RPI-GEN'];
+  const r2 = db.prepare('SELECT last_done_on, next_due_on FROM compliance_activities WHERE id = ?').get(a2) as { last_done_on: string; next_due_on: string };
+  const v2 = seedVisit(db, { activityId: a2, siteId: sites[0].id, roomId: null, performed: r2.last_done_on, inspector: users[1], provider: '', nextDue: r2.next_due_on, now,
+    status: 'complete_remedials', outcome: 'complete_remedials', checklistTemplateId: tpl('RPI-GEN') });
+  itemsOf('RPI-GEN').forEach((q, i) => ans.run(v2, q.code, i === 0 ? 'Issue' : 'Pass', i === 0 ? 'Loose stair carpet on first landing (demo)' : ''));
+  db.prepare(
+    `INSERT INTO actions (ref, activity_id, visit_id, question_code, site_id, title, description, priority, owner_user_id, due_on, state, notes, created_at, updated_at)
+     VALUES ('PH-X' || printf('%03d', (SELECT COUNT(*) + 1 FROM actions)), ?, ?, ?, ?, ?, ?, 'High', ?, ?, 'In progress', '', ?, ?)`,
+  ).run(a2, v2, itemsOf('RPI-GEN')[0].code, sites[0].id, 'Refix loose stair carpet (demo)', 'Raised from routine visit.', users[1], addDays(today, 7), now, now);
+
+  // PH-S002 Fire Safety: visit in progress (3 of 8 answered).
+  const a3 = made['PH-S002/RPI-FIRE'];
+  const v3 = seedVisit(db, { activityId: a3, siteId: sites[1].id, roomId: null, performed: today, inspector: users[1], provider: '', nextDue: today, now,
+    status: 'in_progress', outcome: null, checklistTemplateId: tpl('RPI-FIRE') });
+  itemsOf('RPI-FIRE').slice(0, 3).forEach((q) => ans.run(v3, q.code, 'Pass', ''));
 }

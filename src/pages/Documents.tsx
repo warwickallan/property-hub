@@ -113,7 +113,7 @@ function DocumentModal({ doc, onClose, onChange }: { doc: Row; onClose: () => vo
       <ul className="link-list">
         {doc.links.map((l: Row) => (
           <li key={l.id}>
-            <span className="tag">{l.entity_kind}</span> {l.href ? <a href={l.href} onClick={onClose}>{l.label}</a> : l.label} <span className="muted small">({l.link_role})</span>{' '}
+            <span className="tag">{l.entity_kind === 'action' ? 'remedial' : l.entity_kind}</span> {l.href ? <a href={l.href} onClick={onClose}>{l.label}</a> : l.label} <span className="muted small">({l.link_role})</span>{' '}
             <button className="btn-ghost small" onClick={() => run(() => api.del(`/api/document-links/${l.id}`))}>Unlink</button>
           </li>
         ))}
@@ -123,7 +123,7 @@ function DocumentModal({ doc, onClose, onChange }: { doc: Row; onClose: () => vo
         <input placeholder="Find a record to link…" value={q} onChange={(e) => setQ(e.target.value)} />
         <select aria-label="Link target" value={target} onChange={(e) => setTarget(e.target.value)}>
           <option value="">Choose record…</option>
-          {options.slice(0, 300).map((l) => <option key={`${l.kind}:${l.id}`} value={`${l.kind}:${l.id}`}>[{l.kind}] {l.label}</option>)}
+          {options.slice(0, 300).map((l) => <option key={`${l.kind}:${l.id}`} value={`${l.kind}:${l.id}`}>[{l.kind === 'action' ? 'remedial' : l.kind}] {l.label}</option>)}
         </select>
         <button disabled={!target} onClick={() => run(async () => {
           const [kind, id] = target.split(':');

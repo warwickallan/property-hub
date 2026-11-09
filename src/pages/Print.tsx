@@ -65,30 +65,30 @@ export function SiteFrontSheetPrint({ id }: { id: number }) {
         </tbody>
       </table>
 
-      <h2>Open remedial actions ({openActions.length})</h2>
+      <h2>Open remedials ({openActions.length})</h2>
       {openActions.length ? (
         <table className="sheet-table">
-          <thead><tr><th>Ref</th><th>Action</th><th>Priority</th><th>Status</th><th>Due</th><th>Owner</th><th>Activity</th><th>Source</th></tr></thead>
+          <thead><tr><th>Ref</th><th>Remedial</th><th>Priority</th><th>Status</th><th>Due</th><th>Owner</th><th>Activity</th><th>Source</th></tr></thead>
           <tbody>
             {openActions.map((x: Row) => (
               <tr key={x.id}>
                 <td className="nowrap">{x.ref}</td><td>{x.title}</td><td>{x.priority}</td><td>{x.state}{x.overdue ? ' (overdue)' : ''}</td>
-                <td className="nowrap">{fmtDate(x.due_on)}</td><td>{x.owner_name ?? '—'}</td><td>{x.activity_ref ?? '—'}</td><td>{x.inspection_ref ? `${x.inspection_ref} ${x.question_code ?? ''}` : '—'}</td>
+                <td className="nowrap">{fmtDate(x.due_on)}</td><td>{x.owner_name ?? '—'}</td><td>{x.activity_ref ?? '—'}</td><td>{x.visit_ref ? `${x.visit_ref} ${x.question_code ?? ''}` : '—'}</td>
               </tr>
             ))}
           </tbody>
         </table>
       ) : <p>None.</p>}
 
-      <h2>Recent routine inspections</h2>
+      <h2>Recent inspections / visits</h2>
       {d.inspections.length ? (
         <table className="sheet-table">
-          <thead><tr><th>Ref</th><th>Date</th><th>Scope</th><th>Inspector</th><th>Status</th><th>Answered</th><th>Issues</th></tr></thead>
+          <thead><tr><th>Visit</th><th>Date</th><th>Activity / checklist</th><th>Inspector</th><th>Status</th><th>Answered</th><th>Remedials</th></tr></thead>
           <tbody>
             {d.inspections.slice(0, 5).map((r: Row) => (
               <tr key={r.id}>
-                <td className="nowrap">{r.ref}</td><td className="nowrap">{fmtDate(r.inspected_on)}</td><td>{r.room_code ? `${r.room_code} ${r.room_name}` : 'Whole site'}</td>
-                <td>{r.inspector}</td><td>{r.state === 'complete' ? 'Completed' : 'Draft'}</td><td>{r.answered}/{r.question_count}</td><td>{r.issues}</td>
+                <td className="nowrap">{r.ref}</td><td className="nowrap">{fmtDate(r.performed_on)}</td><td>{r.activity_ref ? `${r.activity_ref} ${r.checklist_name || r.type_code}` : 'Needs review'}</td>
+                <td>{r.inspector ?? '—'}</td><td>{r.status_label}</td><td>{r.question_count ? `${r.answered}/${r.question_count}` : '—'}</td><td>{r.remedial_count ? `${r.open_remedials} open / ${r.remedial_count}` : '—'}</td>
               </tr>
             ))}
           </tbody>
@@ -106,7 +106,7 @@ export function SiteFrontSheetPrint({ id }: { id: number }) {
           </tbody>
         </table>
       ) : <p>None linked.</p>}
-      <footer className="sheet-foot">Routine inspections are visual observations and are not statutory certificates. Fictional demo data. Generated locally by Property Hub.</footer>
+      <footer className="sheet-foot">Inspection status (work done / closed) is shown separately from compliance status (obligation met). Fictional demo data. Generated locally by Property Hub.</footer>
     </div>
   );
 }

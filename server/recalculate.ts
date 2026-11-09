@@ -2,7 +2,7 @@
 // Invoked exclusively by POST /api/recalculate. No timers, cron or background work.
 import type { DB } from './db.js';
 import { getSetting, parseThresholds, setSetting } from './db.js';
-import { evaluateActivity, reminderThreshold, type Applicability, type EvidenceInput, type Status } from './compliance.js';
+import { evaluateActivity, reminderThreshold, type Applicability, type EvidenceInput, type Status, type VisitInput } from './compliance.js';
 import { londonToday } from './dates.js';
 import { buildReminderText, messageKey } from './reminders.js';
 
@@ -10,7 +10,7 @@ interface ActRow {
   id: number;
   ref: string;
   location_level: string;
-  schedule_check_id: number | null;
+  schedule_visit_id: number | null;
   last_done_on: string | null;
   next_due_on: string | null;
   expires_on: string | null;
@@ -41,18 +41,19 @@ export const ACTIVITY_LOCATION_JOINS = `
  * after the last done date (or have no issue date recorded), plus the certificate of the check that set the
  * schedule. A certificate from a previous cycle neither satisfies the evidence rule nor clamps the due date.
  */
-export function evidenceFor(db: DB, activityId: number, lastDone: string | null = null, scheduleCheckId: number | null = null): EvidenceInput | null {
-  const certId = scheduleCheckId
-    ? (db.prepare('SELECT certificate_document_id AS c FROM compliance_checks WHERE id = ?').get(scheduleCheckId) as { c: number | null } | undefined)?.c ?? null
-    : null;
-  const docs = db
-    .prepare(
+export function evidenceFor(db: DB, activityId: number, lastDone: string | null = null, scheduleVisitId: number | null = null): EvidenceInput | null {
+  // V2: when a visit set the schedule, its own linked documents are the evidence for the cycle.
+  const docs = (scheduleVisitId
+    ? db.prepare(
+      `SELECT DISTINCT d.id, d.verified_by_operator AS v, d.valid_until AS vu FROM document_links l
+       JOIN documents d ON d.id = l.document_id WHERE l.entity_kind = 'inspection' AND l.entity_id = ?`,
+    ).all(scheduleVisitId)
+    : db.prepare(
       `SELECT DISTINCT d.id, d.verified_by_operator AS v, d.valid_until AS vu FROM document_links l
        JOIN documents d ON d.id = l.document_id
        WHERE l.entity_kind = 'activity' AND l.entity_id = ?
-         AND (d.issued_on IS NULL OR ? IS NULL OR d.issued_on >= ? OR d.id = ?)`,
-    )
-    .all(activityId, lastDone, lastDone, certId) as { v: number; vu: string | null }[];
+         AND (d.issued_on IS NULL OR ? IS NULL OR d.issued_on >= ?)`,
+    ).all(activityId, lastDone, lastDone)) as { v: number; vu: string | null }[];
   if (!docs.length) return null;
   const verified = docs.filter((d) => d.v);
   if (!verified.length) return { verified: false, validUntil: null };
@@ -72,7 +73,7 @@ export function recalculate(db: DB, now: Date) {
     );
     const rows = db
       .prepare(
-        `SELECT a.id, a.ref, a.location_level, a.schedule_check_id, a.last_done_on, a.next_due_on, a.expires_on, a.interval_months, a.applicability, a.na_reason,
+        `SELECT a.id, a.ref, a.location_level, a.schedule_visit_id, a.last_done_on, a.next_due_on, a.expires_on, a.interval_months, a.applicability, a.na_reason,
                 t.name AS type_name, t.suggested_interval_months AS type_interval, t.warning_days, t.evidence_required,
                 a.owner_user_id, u.name AS owner_name, u.email AS owner_email, u.active AS owner_active,
                 ar.code AS area_code, s.code AS site_code, r.code AS room_code
@@ -84,12 +85,12 @@ export function recalculate(db: DB, now: Date) {
       )
       .all() as ActRow[];
 
-    // Latest non-superseded, completed check that is not older than the activity's last done date.
-    const latestCheck = db.prepare(
-      `SELECT ref, performed_on AS performedOn, outcome FROM compliance_checks
-       WHERE activity_id = ? AND superseded_by_id IS NULL AND outcome <> 'Not completed' AND (? IS NULL OR performed_on >= ?)
-       ORDER BY performed_on DESC, id DESC LIMIT 1`,
+    const scheduleVisit = db.prepare(
+      `SELECT v.ref, v.status, v.closed_at AS closedOn,
+              (SELECT COUNT(*) FROM actions x WHERE x.visit_id = v.id AND x.state <> 'Done') AS openRemedials
+       FROM visits v WHERE v.id = ?`,
     );
+    const inProgress = db.prepare("SELECT ref FROM visits WHERE activity_id = ? AND status = 'in_progress' ORDER BY id DESC LIMIT 1");
     const critical = db.prepare(
       `SELECT COUNT(*) AS n FROM actions WHERE activity_id = ? AND priority = 'Critical' AND state <> 'Done'`,
     );
@@ -112,10 +113,11 @@ export function recalculate(db: DB, now: Date) {
           expiresOn: a.expires_on,
           intervalMonths: a.interval_months ?? a.type_interval,
           evidenceRequired: !!a.evidence_required,
-          evidence: evidenceFor(db, a.id, a.last_done_on, a.schedule_check_id),
+          evidence: evidenceFor(db, a.id, a.last_done_on, a.schedule_visit_id),
           openCriticalActions: (critical.get(a.id) as { n: number }).n,
           warningDays: a.warning_days,
-          latestCheck: (latestCheck.get(a.id, a.last_done_on, a.last_done_on) as { ref: string; performedOn: string; outcome: string } | undefined) ?? null,
+          visit: a.schedule_visit_id ? ((scheduleVisit.get(a.schedule_visit_id) as VisitInput | undefined) ?? null) : null,
+          inProgressRef: (inProgress.get(a.id) as { ref: string } | undefined)?.ref ?? null,
         },
         today,
       );

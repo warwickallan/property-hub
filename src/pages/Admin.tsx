@@ -102,7 +102,7 @@ export function AdminCoreData() {
   );
 
   return (
-    <Page title="Core Data — Area › Site › Room" crumbs="Admin / Setup" actions={<label className="inline small"><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Show archived</label>}>
+    <Page title="Property Details — Area › Site › Room" crumbs="Admin / Setup" actions={<label className="inline small"><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Show archived</label>}>
       <p className="muted small">A Site is a property. Equipment is added to a Room (open the room, or use the Equipment register).</p>
       <div className="grid3">
         <Col kind="area" rows={core.areas.filter(vis)} sel={area} onSel={(id) => { setArea(id); setSite(null); }} count={(r) => `${r.site_count} sites`} parentOk />
@@ -185,7 +185,7 @@ export function AdminTypes() {
             { key: 'name', label: 'Name' },
             { key: 'suggested_interval_months', label: 'Default interval', render: (t) => (t.suggested_interval_months ? `${t.suggested_interval_months} months` : '—') },
             { key: 'warning_days', label: 'Warning days', className: 'num' },
-            { key: 'evidence_required', label: 'Evidence required', render: (t) => (t.evidence_required ? 'Yes' : 'No') },
+            { key: "evidence_required", label: "Evidence / certificate required", render: (t) => (t.evidence_required ? "Yes: blocks closure until verified" : "No") },
             { key: 'activity_count', label: 'Activities', className: 'num' },
             { key: 'active', label: 'Status', render: (t) => (t.active ? 'Active' : 'Archived') },
           ]}
@@ -220,7 +220,7 @@ function TypeModal({ t, onClose, onSaved }: { t: Row; onClose: () => void; onSav
         <Field label="Default interval (months)"><input type="number" min={1} value={f.suggested_interval_months} onChange={(e) => setF({ ...f, suggested_interval_months: e.target.value })} /></Field>
         <Field label="Warning days"><input type="number" min={0} value={f.warning_days} onChange={(e) => setF({ ...f, warning_days: e.target.value })} /></Field>
       </div>
-      <label className="inline"><input type="checkbox" checked={f.evidence_required} onChange={(e) => setF({ ...f, evidence_required: e.target.checked })} /> Verified evidence required</label>
+      <label className="inline"><input type="checkbox" checked={f.evidence_required} onChange={(e) => setF({ ...f, evidence_required: e.target.checked })} /> Evidence / Certificate required <span className="muted small">(an inspection cannot be Closed until a linked document is marked Reviewed/Verified)</span></label>
       <label className="inline"><input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} /> Active</label>
       <Field label="Notes"><textarea rows={2} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
       <div className="form-actions"><button className="btn-primary" onClick={save}>Save</button><button onClick={onClose}>Cancel</button></div>

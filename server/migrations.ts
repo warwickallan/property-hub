@@ -291,46 +291,108 @@ CREATE INDEX idx_actions_run ON actions(inspection_run_id);
   },
   {
     version: 3,
-    name: 'P1.1 derived next-due with explicit override, compliance check events, schedule change log',
+    name: 'V2: checklist templates, visits (inspection occurrences) with lifecycle, remedials on visits, calculated next due, schedule log',
     sql: `
+-- Checklist templates belong to a Compliance Type; items are editable; visits keep a frozen snapshot.
+CREATE TABLE checklist_templates (
+  id INTEGER PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL CHECK (length(trim(name)) > 0),
+  compliance_type_id INTEGER NOT NULL REFERENCES compliance_types(id) ON DELETE RESTRICT,
+  description TEXT NOT NULL DEFAULT '',
+  version INTEGER NOT NULL DEFAULT 1,
+  active INTEGER NOT NULL DEFAULT 1,
+  source TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE checklist_items (
+  id INTEGER PRIMARY KEY,
+  template_id INTEGER NOT NULL REFERENCES checklist_templates(id) ON DELETE CASCADE,
+  code TEXT NOT NULL,
+  section TEXT NOT NULL DEFAULT '',
+  question TEXT NOT NULL CHECK (length(trim(question)) > 0),
+  sort_order INTEGER NOT NULL,
+  mandatory INTEGER NOT NULL DEFAULT 1,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (template_id, code)
+);
+CREATE INDEX idx_items_template ON checklist_items(template_id, sort_order);
+
+ALTER TABLE compliance_activities ADD COLUMN checklist_template_id INTEGER REFERENCES checklist_templates(id) ON DELETE SET NULL;
 ALTER TABLE compliance_activities ADD COLUMN next_due_override INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE compliance_activities ADD COLUMN next_due_override_reason TEXT NOT NULL DEFAULT '';
-ALTER TABLE compliance_activities ADD COLUMN schedule_check_id INTEGER;
+ALTER TABLE compliance_activities ADD COLUMN schedule_visit_id INTEGER;
 
-CREATE TABLE compliance_checks (
+-- An Inspection / Visit is one occurrence of work against a Compliance Activity.
+CREATE TABLE visits (
   id INTEGER PRIMARY KEY,
   ref TEXT NOT NULL UNIQUE,
-  activity_id INTEGER NOT NULL REFERENCES compliance_activities(id) ON DELETE RESTRICT,
-  performed_on TEXT NOT NULL,
+  activity_id INTEGER REFERENCES compliance_activities(id) ON DELETE RESTRICT,
+  site_id INTEGER REFERENCES sites(id) ON DELETE RESTRICT,
+  room_id INTEGER REFERENCES rooms(id) ON DELETE RESTRICT,
+  performed_on TEXT,
   inspector_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
   provider_name TEXT NOT NULL DEFAULT '',
-  outcome TEXT NOT NULL CHECK (outcome IN ('Satisfactory','Satisfactory with advisories','Unsatisfactory','Not completed')),
   notes TEXT NOT NULL DEFAULT '',
-  certificate_document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
-  interval_months_used INTEGER,
-  proposed_next_due TEXT,
+  checklist_template_id INTEGER REFERENCES checklist_templates(id) ON DELETE SET NULL,
+  checklist_version INTEGER,
+  checklist_name TEXT NOT NULL DEFAULT '',
+  checklist_snapshot TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress','complete','complete_remedials','awaiting_evidence','closed')),
+  outcome TEXT CHECK (outcome IS NULL OR outcome IN ('complete','complete_remedials')),
+  completed_at TEXT,
+  closed_at TEXT,
   next_due_override INTEGER NOT NULL DEFAULT 0,
-  next_due_on TEXT,
+  next_due_set TEXT,
   override_reason TEXT NOT NULL DEFAULT '',
   schedule_applied INTEGER NOT NULL DEFAULT 0,
   previous_last_done TEXT,
   previous_next_due TEXT,
   previous_override INTEGER NOT NULL DEFAULT 0,
   previous_override_reason TEXT NOT NULL DEFAULT '',
-  previous_schedule_check_id INTEGER,
-  amends_check_id INTEGER REFERENCES compliance_checks(id) ON DELETE RESTRICT,
-  superseded_by_id INTEGER REFERENCES compliance_checks(id) ON DELETE RESTRICT,
-  amendment_reason TEXT NOT NULL DEFAULT '',
-  recorded_at TEXT NOT NULL
+  previous_schedule_visit_id INTEGER,
+  needs_review INTEGER NOT NULL DEFAULT 0,
+  review_note TEXT NOT NULL DEFAULT '',
+  legacy_inspection_run_id INTEGER,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
-CREATE INDEX idx_checks_activity ON compliance_checks(activity_id, performed_on);
+CREATE INDEX idx_visits_activity ON visits(activity_id, performed_on);
+CREATE INDEX idx_visits_site ON visits(site_id);
+CREATE TABLE visit_answers (
+  id INTEGER PRIMARY KEY,
+  visit_id INTEGER NOT NULL REFERENCES visits(id) ON DELETE CASCADE,
+  item_code TEXT NOT NULL,
+  response TEXT NOT NULL CHECK (response IN ('Pass','Issue','Not applicable','Not checked')),
+  notes TEXT NOT NULL DEFAULT '',
+  UNIQUE (visit_id, item_code)
+);
+CREATE TABLE visit_events (
+  id INTEGER PRIMARY KEY,
+  visit_id INTEGER NOT NULL REFERENCES visits(id) ON DELETE CASCADE,
+  at TEXT NOT NULL,
+  event TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX idx_visit_events ON visit_events(visit_id, at);
+
+-- Remedials (table "actions") belong to a visit, optionally a checklist answer and equipment.
+ALTER TABLE actions ADD COLUMN visit_id INTEGER REFERENCES visits(id) ON DELETE RESTRICT;
+ALTER TABLE actions ADD COLUMN question_code TEXT;
+ALTER TABLE actions ADD COLUMN equipment_id INTEGER REFERENCES equipment(id) ON DELETE SET NULL;
+ALTER TABLE actions ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX idx_actions_visit ON actions(visit_id);
 
 CREATE TABLE activity_schedule_log (
   id INTEGER PRIMARY KEY,
   activity_id INTEGER NOT NULL REFERENCES compliance_activities(id) ON DELETE CASCADE,
   changed_at TEXT NOT NULL,
-  source TEXT NOT NULL CHECK (source IN ('edit','check','amendment','type-interval','migration')),
-  check_id INTEGER REFERENCES compliance_checks(id) ON DELETE SET NULL,
+  source TEXT NOT NULL CHECK (source IN ('edit','visit','visit-reopen','type-interval','migration')),
+  visit_id INTEGER REFERENCES visits(id) ON DELETE SET NULL,
   old_last_done TEXT, new_last_done TEXT,
   old_next_due TEXT, new_next_due TEXT,
   old_override INTEGER NOT NULL DEFAULT 0, new_override INTEGER NOT NULL DEFAULT 0,
@@ -339,19 +401,61 @@ CREATE TABLE activity_schedule_log (
 CREATE INDEX idx_schedlog_activity ON activity_schedule_log(activity_id, changed_at);
 `,
     up: (db) => {
-      // Classify existing schedules. A stored next-due equal to last done + interval becomes "derived";
-      // a different stored date is preserved as an explicit override (never silently changed).
+      const now = new Date().toISOString();
+      // 1. Schedules: a stored next-due equal to last done + interval becomes "calculated";
+      //    a different stored date is preserved as an explicit, labelled override (never silently changed).
       const rows = db.prepare(
         `SELECT a.id, a.last_done_on, a.next_due_on, a.interval_months, t.suggested_interval_months AS type_interval
          FROM compliance_activities a JOIN compliance_types t ON t.id = a.type_id`,
       ).all() as { id: number; last_done_on: string | null; next_due_on: string | null; interval_months: number | null; type_interval: number | null }[];
-      const setOverride = db.prepare("UPDATE compliance_activities SET next_due_override = 1, next_due_override_reason = 'Explicit next-due date entered before v0.4 (kept as override)' WHERE id = ?");
+      const setOverride = db.prepare("UPDATE compliance_activities SET next_due_override = 1, next_due_override_reason = 'Next-due date entered before v0.5 (kept as override; untick to calculate)' WHERE id = ?");
       const setDerived = db.prepare('UPDATE compliance_activities SET next_due_on = ? WHERE id = ?');
       for (const r of rows) {
         const derived = derivedNextDue(r.last_done_on, r.interval_months ?? r.type_interval);
         if (r.next_due_on && r.next_due_on !== derived) setOverride.run(r.id);
         else if (!r.next_due_on && derived) setDerived.run(derived, r.id);
       }
+
+      // 2. Legacy routine 30-point inspections -> visits with the SAME id (so document links of kind
+      //    'inspection' and remedial links stay valid). They are not linked to any Compliance Activity
+      //    (that cannot be determined reliably) and are flagged for review. Old tables are left untouched.
+      const legacyQs = db.prepare('SELECT code, group_name, question, sort_order, template_code, template_version FROM checklist_questions ORDER BY sort_order').all() as any[];
+      const snapshot = JSON.stringify(legacyQs.map((q) => ({ code: q.code, section: q.group_name, question: q.question, sort_order: q.sort_order, mandatory: 1 })));
+      const tv = legacyQs[0] ? `${legacyQs[0].template_code} ${legacyQs[0].template_version}` : '';
+      const runs = db.prepare('SELECT * FROM inspection_runs ORDER BY id').all() as any[];
+      const insVisit = db.prepare(
+        `INSERT INTO visits (id, ref, activity_id, site_id, room_id, performed_on, inspector_user_id, provider_name, notes, checklist_name, checklist_snapshot,
+           status, outcome, completed_at, needs_review, review_note, legacy_inspection_run_id, created_at, updated_at)
+         VALUES (@id, @ref, NULL, @site_id, @room_id, @performed_on, @inspector_user_id, @provider_name, @notes, @checklist_name, @snapshot,
+           @status, @outcome, @completed_at, 1, @review_note, @id, @created_at, @updated_at)`,
+      );
+      const openRemedials = db.prepare("SELECT COUNT(*) AS n FROM actions WHERE inspection_run_id = ? AND state <> 'Done'");
+      const anyRemedials = db.prepare('SELECT COUNT(*) AS n FROM actions WHERE inspection_run_id = ?');
+      const event = db.prepare('INSERT INTO visit_events (visit_id, at, event, detail) VALUES (?, ?, ?, ?)');
+      for (const r of runs) {
+        const done = r.state === 'complete';
+        const open = (openRemedials.get(r.id) as { n: number }).n;
+        const any = (anyRemedials.get(r.id) as { n: number }).n;
+        insVisit.run({
+          id: r.id, ref: r.ref ?? `PH-I${String(r.id).padStart(3, '0')}`, site_id: r.site_id, room_id: r.room_id, performed_on: r.inspected_on,
+          inspector_user_id: r.inspector_user_id ?? null, provider_name: r.inspector_user_id ? '' : (r.inspector_name ?? ''), notes: r.notes ?? '',
+          checklist_name: `Legacy 30-point routine inspection (${tv})`, snapshot,
+          status: !done ? 'in_progress' : open ? 'complete_remedials' : 'complete', outcome: !done ? null : any ? 'complete_remedials' : 'complete',
+          completed_at: done ? (r.completed_at ?? r.created_at) : null,
+          review_note: 'Upgraded from a v0.3 site-wide 30-point inspection. Not linked to a Compliance Activity: link it to the matching routine activity if appropriate.',
+          created_at: r.created_at, updated_at: r.updated_at ?? r.created_at,
+        });
+        event.run(r.id, now, 'migrated', 'Copied from legacy routine inspection record during upgrade (original kept)');
+      }
+      db.prepare(
+        `INSERT INTO visit_answers (visit_id, item_code, response, notes)
+         SELECT run_id, question_code, response, notes FROM inspection_answers WHERE run_id IN (SELECT id FROM visits)`,
+      ).run();
+
+      // 3. Remedials: attach to their visit and checklist question where known; standalone ones are flagged.
+      db.prepare('UPDATE actions SET visit_id = inspection_run_id WHERE inspection_run_id IS NOT NULL AND inspection_run_id IN (SELECT id FROM visits)').run();
+      db.prepare('UPDATE actions SET question_code = (SELECT question_code FROM inspection_answers ia WHERE ia.id = actions.inspection_answer_id) WHERE inspection_answer_id IS NOT NULL').run();
+      db.prepare('UPDATE actions SET needs_review = 1 WHERE visit_id IS NULL').run();
     },
   },
 ];

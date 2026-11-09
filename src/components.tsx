@@ -209,7 +209,7 @@ export function useStoredState<T>(key: string, initial: T): [T, (v: T) => void] 
 }
 
 // ---------- documents panel (used on every detail screen) ----------
-export function DocumentsPanel({ kind, id, title = 'Documents' }: { kind: string; id: number; title?: string }) {
+export function DocumentsPanel({ kind, id, title = 'Documents', locked = false }: { kind: string; id: number; title?: string; locked?: boolean }) {
   const { data: docs, reload, error } = useLoad<Row[]>(`/api/documents?entity_kind=${kind}&entity_id=${id}`);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -271,13 +271,13 @@ export function DocumentsPanel({ kind, id, title = 'Documents' }: { kind: string
                 <td>{fmtDate(d.valid_until)}</td>
                 <td>
                   <label className="inline">
-                    <input type="checkbox" checked={!!d.verified_by_operator}
+                    <input type="checkbox" aria-label={`Verify ${d.display_name}`} checked={!!d.verified_by_operator} disabled={locked && !!d.verified_by_operator}
                       onChange={(e) => act(() => api.put(`/api/documents/${d.id}`, { verified_by_operator: e.target.checked }))} />
                     {d.verified_by_operator ? 'Verified' : 'Not verified'}
                   </label>
                 </td>
                 <td className="small">{d.links.length} record{d.links.length === 1 ? '' : 's'}</td>
-                <td><button className="btn-ghost small" onClick={() => act(() => api.del(`/api/document-links/${d.link_id}`))}>Unlink</button></td>
+                <td>{locked ? <span className="muted small">Locked (closed)</span> : <button className="btn-ghost small" onClick={() => act(() => api.del(`/api/document-links/${d.link_id}`))}>Unlink</button>}</td>
               </tr>
             ))}
           </tbody>

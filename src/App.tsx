@@ -7,10 +7,10 @@ import { EquipmentRegister, EquipmentDetail } from './pages/Equipment';
 import { DocumentsLibrary } from './pages/Documents';
 import { LocationDetail } from './pages/Location';
 import { Reminders } from './pages/Reminders';
-import { ActionsRegister, ActionDetail } from './pages/Actions';
-import { Inspections, InspectionDetail } from './pages/Inspections';
+import { RemedialsRegister, RemedialDetail } from './pages/Actions';
+import { VisitsRegister, VisitDetail } from './pages/Visits';
+import { ChecklistsAdmin, ChecklistEditor } from './pages/Checklists';
 import { SiteFrontSheetPrint } from './pages/Print';
-import { CheckForm } from './pages/Checks';
 import { AdminPeople, AdminCoreData, AdminTypes, AdminSettings, ServiceCharges } from './pages/Admin';
 
 function useHash() {
@@ -23,19 +23,21 @@ function useHash() {
   return hash;
 }
 
+// Everyday work. Compliance Activities (scheduled configuration) live under Admin / Setup.
 const NAV = [
   ['#/', 'Dashboard'],
-  ['#/activities', 'Compliance Activities'],
+  ['#/visits', 'Inspections / Visits'],
+  ['#/remedials', 'Remedials'],
   ['#/equipment', 'Equipment'],
   ['#/documents', 'Documents'],
-  ['#/inspections', 'Inspections'],
-  ['#/actions', 'Actions'],
   ['#/reminders', 'Reminders'],
 ];
 const ADMIN_NAV = [
   ['#/admin/people', 'People / Users'],
-  ['#/admin/core', 'Core Data'],
+  ['#/admin/property', 'Property Details'],
   ['#/admin/types', 'Compliance Types'],
+  ['#/admin/checklists', 'Checklists'],
+  ['#/admin/activities', 'Compliance Activities'],
   ['#/admin/settings', 'Settings'],
 ];
 
@@ -48,23 +50,23 @@ function route(hash: string) {
     case 'activities':
       if (b === 'new') return <ActivityForm />;
       if (id && c === 'edit') return <ActivityForm id={id} />;
-      if (id && c === 'check') return <CheckForm activityId={id} key={hash} />;
-      if (id) return <ActivityDetail id={id} />;
+      if (id) return <ActivityDetail id={id} key={hash} />;
       return <ActivitiesRegister />;
     case 'equipment': return id ? <EquipmentDetail id={id} /> : <EquipmentRegister />;
     case 'documents': return <DocumentsLibrary />;
     case 'areas': case 'sites': case 'rooms':
       if (a === 'sites' && id && c === 'print') return <SiteFrontSheetPrint id={id} />;
       return id ? <LocationDetail kind={a.slice(0, -1) as 'area' | 'site' | 'room'} id={id} key={hash} /> : <AdminCoreData />;
-    case 'checks': return id && c === 'amend' ? <CheckForm amendId={id} key={hash} /> : <Inspections />;
-    case 'inspections': return id ? <InspectionDetail id={id} key={id} /> : <Inspections />;
-    case 'actions': return id ? <ActionDetail id={id} key={id} /> : <ActionsRegister />;
+    case 'visits': case 'inspections': return id ? <VisitDetail id={id} key={id} /> : <VisitsRegister />;
+    case 'remedials': case 'actions': return id ? <RemedialDetail id={id} key={id} /> : <RemedialsRegister />;
     case 'reminders': return <Reminders />;
     case 'service-charges': return <ServiceCharges />;
     case 'admin':
       if (b === 'people') return <AdminPeople />;
       if (b === 'types') return <AdminTypes />;
       if (b === 'settings') return <AdminSettings />;
+      if (b === 'activities') return <ActivitiesRegister />;
+      if (b === 'checklists') return c && /^\d+$/.test(c) ? <ChecklistEditor id={Number(c)} key={c} /> : <ChecklistsAdmin />;
       return <AdminCoreData />;
     default: return <p>Page not found. <a href="#/">Go to Dashboard</a></p>;
   }
@@ -120,7 +122,9 @@ export function App() {
     return () => window.removeEventListener('ph:recalculated', f);
   }, []);
   if (/^#\/sites\/\d+\/print/.test(hash)) return <main className="print-main" key={gen}>{route(hash)}</main>;
-  const active = (h: string) => (h === '#/' ? hash === '#/' || hash === '#' : hash.startsWith(h));
+  const alias: Record<string, string> = { '#/inspections': '#/visits', '#/actions': '#/remedials', '#/activities': '#/admin/activities', '#/admin/core': '#/admin/property' };
+  const norm = Object.entries(alias).reduce((h, [from, to]) => (h.startsWith(from) ? to + h.slice(from.length) : h), hash);
+  const active = (h: string) => (h === '#/' ? norm === '#/' || norm === '#' : norm.startsWith(h));
   return (
     <div className="layout">
       <Header />

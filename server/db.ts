@@ -20,6 +20,11 @@ export function migrate(db: DB): void {
     );
   }
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)');
+  // A never-released v0.4.0 build used a different migration 3; refuse rather than guess.
+  const m3 = db.prepare('SELECT name FROM schema_migrations WHERE version = 3').get() as { name: string } | undefined;
+  if (m3 && m3.name.startsWith('P1.1')) {
+    throw new Error('This database was created by an unreleased v0.4.0 test build. Restore a v0.3 backup or recreate it; it cannot be upgraded automatically.');
+  }
   const applied = new Set(
     (db.prepare('SELECT version FROM schema_migrations').all() as { version: number }[]).map((r) => r.version),
   );

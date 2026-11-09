@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { downloadCsv, type Core, type Row } from '../api';
+import { api, downloadCsv, type Core, type Row } from '../api';
 import { Card, DataTable, ErrorBox, Loading, LocationSelects, Page, StatusChip, Tabs, useStoredState, type Col, type LocFilter } from '../components';
 import { fmtDate, locationLabel, navigate, STATUS_LABEL, useLoad } from '../util';
+import { VISIT_STATUS, VisitStatusTag } from './Visits';
 
 interface Filters extends LocFilter {
   type: string;
@@ -13,12 +14,21 @@ interface Filters extends LocFilter {
   q: string;
   applicability: string;
   evidence: string;
+  visit: string;
+  remedials: string;
   view: string;
 }
-const EMPTY: Filters = { area: '', site: '', room: '', type: '', status: '', owner: '', equipment: '', from: '', to: '', q: '', applicability: '', evidence: '', view: 'all' };
+const EMPTY: Filters = { area: '', site: '', room: '', type: '', status: '', owner: '', equipment: '', from: '', to: '', q: '', applicability: '', evidence: '', visit: '', remedials: '', view: 'all' };
 
 const dueOf = (a: Row) => a.snap_due_on ?? a.next_due_on ?? null;
-const missingEvidence = (a: Row) => !!a.evidence_required && a.applicability === 'required' && !a.verified_doc_count;
+/** Evidence state of the obligation: from the visit that set the schedule, else activity documents (older schedules). */
+export function evidenceState(a: Row): 'notreq' | 'verified' | 'awaiting' | 'missing' {
+  if (!a.evidence_required || a.applicability !== 'required') return 'notreq';
+  if (a.schedule_visit_id) return a.schedule_visit_status === 'closed' ? 'verified' : a.schedule_visit_status === 'awaiting_evidence' ? 'awaiting' : 'missing';
+  return a.verified_doc_count ? 'verified' : 'missing';
+}
+const missingEvidence = (a: Row) => ['missing', 'awaiting'].includes(evidenceState(a));
+const EVIDENCE_LABEL = { notreq: <span className="muted small">Not required</span>, verified: <span className="ok">✔ Verified</span>, awaiting: <span className="warn">Awaiting</span>, missing: <span className="warn">Missing</span> };
 
 function applyFilters(rows: Row[], f: Filters, core: Core) {
   const roomEquip = f.room ? new Set(core.equipment.filter((e) => String(e.room_id) === f.room).map((e) => e.id)) : null;
@@ -35,8 +45,9 @@ function applyFilters(rows: Row[], f: Filters, core: Core) {
     if (f.from && (!due || due < f.from)) return false;
     if (f.to && (!due || due > f.to)) return false;
     if (f.applicability && a.applicability !== f.applicability) return false;
-    if (f.evidence === 'missing' && !missingEvidence(a)) return false;
-    if (f.evidence === 'verified' && !a.verified_doc_count) return false;
+    if (f.evidence && evidenceState(a) !== f.evidence) return false;
+    if (f.visit === 'none' ? a.visit_count > 0 : f.visit === 'in_progress' ? !a.open_visit_id : f.visit && a.latest_visit_status !== f.visit) return false;
+    if (f.remedials === 'open' ? !a.open_actions : f.remedials === 'none' ? a.open_actions > 0 : false) return false;
     if (q && !`${a.ref} ${a.name} ${a.type_name} ${a.type_code} ${a.area_name} ${a.site_code} ${a.site_name} ${a.room_code ?? ''} ${a.room_name ?? ''} ${a.owner_name ?? ''}`.toLowerCase().includes(q)) return false;
     if (f.view === 'overdue' && a.status !== 'red') return false;
     if (f.view === 'due' && a.status !== 'amber') return false;
@@ -56,17 +67,36 @@ const COLS: Col[] = [
   { key: 'type_code', label: 'Type' },
   { key: 'name', label: 'Activity', render: (a) => a.name || '—' },
   { key: 'equipment_count', label: 'Equip.', className: 'num' },
-  { key: 'last_done_on', label: 'Last done', render: (a) => fmtDate(a.last_done_on) },
+  { key: 'last_done_on', label: 'Last work', render: (a) => fmtDate(a.last_done_on) },
   { key: 'next_due', label: 'Next due', render: (a) => fmtDate(dueOf(a)), sort: dueOf },
   { key: 'days_to_due', label: 'Days', className: 'num', render: (a) => a.days_to_due ?? '—' },
   { key: 'status', label: 'Status', render: (a) => <StatusChip status={a.status} title={a.status_reason} />, sort: (a) => ({ red: 0, amber: 1, grey: 2, green: 3, na: 4 } as Row)[a.status] ?? 5 },
+  { key: 'visit', label: 'Latest visit', render: (a) => (a.latest_visit_ref ? <><VisitStatusTag s={a.latest_visit_status} /><div className="muted small">{a.latest_visit_ref}</div></> : <span className="muted small">None</span>), sort: (a) => a.latest_visit_status ?? '' },
+  { key: 'open_actions', label: 'Remedials', className: 'num', render: (a) => (a.open_actions ? <span className="warn">{a.open_actions} open</span> : '—') },
+  { key: 'evidence', label: 'Evidence', sort: (a) => evidenceState(a), render: (a) => EVIDENCE_LABEL[evidenceState(a)] },
   { key: 'owner_name', label: 'Responsible', render: (a) => a.owner_name ?? '—' },
-  {
-    key: 'evidence', label: 'Evidence', sort: (a) => a.verified_doc_count,
-    render: (a) => a.verified_doc_count ? <span className="ok">✔ Verified</span> : a.doc_count ? <span className="warn">Unverified</span> : <span className="muted">None</span>,
-  },
-  { key: 'open_actions', label: 'Actions', className: 'num', render: (a) => a.open_actions || '—' },
 ];
+
+/** Start a visit for the activity, or open the one already in progress. */
+function VisitButton({ a }: { a: Row }) {
+  const [busy, setBusy] = useState(false);
+  if (a.applicability === 'not_applicable') return null;
+  return (
+    <button className={`small ${a.open_visit_id ? '' : 'btn-primary'}`} disabled={busy} onClick={async (e) => {
+      e.stopPropagation();
+      if (a.open_visit_id) return navigate(`#/visits/${a.open_visit_id}`);
+      setBusy(true);
+      try {
+        const v = await api.post('/api/visits', { activity_id: a.id, inspector_user_id: a.owner_user_id });
+        navigate(`#/visits/${v.id}`);
+      } catch (err: any) {
+        alert(err.message);
+        setBusy(false);
+      }
+    }}>{a.open_visit_id ? `Open ${a.open_visit_ref}` : 'Start visit'}</button>
+  );
+}
+const DASH_COLS: Col[] = [...COLS.filter((c) => !['area_code', 'equipment_count'].includes(c.key)), { key: 'go', label: '', render: (a) => <VisitButton a={a} /> }];
 
 function FilterBar({ core, f, set, extended }: { core: Core; f: Filters; set: (f: Filters) => void; extended?: boolean }) {
   const u = (k: keyof Filters) => (e: { target: { value: string } }) => set({ ...f, [k]: e.target.value });
@@ -104,13 +134,26 @@ function FilterBar({ core, f, set, extended }: { core: Core; f: Filters; set: (f
             <option value="not_applicable">Not applicable</option>
             <option value="unknown">Unknown</option>
           </select>
-          <select aria-label="Evidence" value={f.evidence} onChange={u('evidence')}>
-            <option value="">Any evidence</option>
-            <option value="verified">Has verified evidence</option>
-            <option value="missing">Missing verified evidence</option>
-          </select>
         </>
       )}
+      <select aria-label="Visit status" value={f.visit} onChange={u('visit')}>
+        <option value="">Any visit state</option>
+        <option value="none">Never inspected</option>
+        <option value="in_progress">Visit in progress</option>
+        {Object.entries(VISIT_STATUS).filter(([k]) => k !== 'in_progress').map(([k, l]) => <option key={k} value={k}>Latest: {l}</option>)}
+      </select>
+      <select aria-label="Remedial state" value={f.remedials} onChange={u('remedials')}>
+        <option value="">Any remedials</option>
+        <option value="open">Open remedials</option>
+        <option value="none">No open remedials</option>
+      </select>
+      <select aria-label="Evidence state" value={f.evidence} onChange={u('evidence')}>
+        <option value="">Any evidence</option>
+        <option value="verified">Evidence verified</option>
+        <option value="awaiting">Awaiting evidence</option>
+        <option value="missing">Evidence missing</option>
+        <option value="notreq">Evidence not required</option>
+      </select>
       <input type="search" placeholder="Search ref, name, site, owner…" value={f.q} onChange={u('q')} />
       <button className="btn-ghost" onClick={() => set({ ...EMPTY, view: f.view })}>Clear</button>
     </div>
@@ -180,10 +223,11 @@ export function Dashboard() {
     ['Due soon', n('amber'), 'amber', 'due'],
     ['Overdue / at risk', n('red'), 'red', 'overdue'],
     ['Unknown', n('grey') + n(null), 'grey', 'all'],
-    ['Open actions', (actions ?? []).filter((x) => x.state !== 'Done').length, '', ''],
+    ['Open remedials', (actions ?? []).filter((x) => x.state !== 'Done').length, '', ''],
   ];
   return (
-    <Page title="Dashboard" actions={<>{f.view !== 'location' && f.view !== 'type' && <ExportButton rows={viewRows} />}<a className="btn btn-primary" href="#/activities/new">+ New Activity</a></>}>
+    <Page title="Dashboard" actions={<>{f.view !== 'location' && f.view !== 'type' && <ExportButton rows={viewRows} />}<a className="btn btn-primary" href="#/visits">Inspections / Visits</a></>}>
+      <p className="muted small">Operational view of scheduled obligations. Start or open a visit from any row; statuses change only when you click Recalculate Compliance.</p>
       {!acts.some((a) => a.status) && <div className="note">Statuses are <strong>Not yet calculated</strong>. Click <strong>Recalculate Compliance</strong> in the header.</div>}
       <div className="kpis">
         {kpis.map(([label, value, cls, view]) => (
@@ -208,7 +252,7 @@ export function Dashboard() {
       />
       {f.view === 'location' ? <Grouped rows={filtered} by="site" />
         : f.view === 'type' ? <Grouped rows={filtered} by="type" />
-          : <DataTable cols={COLS} rows={viewRows} onRowClick={(a) => navigate(`#/activities/${a.id}`)} initialSort={{ key: 'status', dir: 1 }} empty="No activities match these filters" />}
+          : <DataTable cols={DASH_COLS} rows={viewRows} onRowClick={(a) => navigate(`#/activities/${a.id}`)} initialSort={{ key: 'status', dir: 1 }} empty="No activities match these filters" />}
     </Page>
   );
 }
@@ -220,11 +264,13 @@ export function ActivitiesRegister() {
   if (error) return <ErrorBox error={error} />;
   if (!core || !acts) return <Loading />;
   return (
-    <Page title="Compliance Activities" actions={<><ExportButton rows={rows} /><a className="btn btn-primary" href="#/activities/new">+ New Activity</a></>}>
+    <Page title="Compliance Activities" crumbs="Admin / Setup" actions={<><ExportButton rows={rows} /><a className="btn btn-primary" href="#/activities/new">+ New Activity</a></>}>
+      <p className="muted small">Scheduled obligations: each links a Compliance Type, a checklist, one location, a frequency and a responsible person. The work itself is recorded as Inspections / Visits.</p>
       <FilterBar core={core} f={f} set={setF} extended />
       <Card>
         <DataTable
-          cols={[...COLS.slice(0, 9), { key: 'interval_months', label: 'Interval', render: (a) => (a.interval_months ?? a.type_interval) ? `${a.interval_months ?? a.type_interval} mo` : '—' }, ...COLS.slice(9)]}
+          cols={[...COLS.slice(0, 6), { key: 'checklist_name', label: 'Checklist', render: (a) => a.checklist_name ?? <span className="muted">—</span> },
+            { key: 'interval_months', label: 'Interval', render: (a) => a.effective_interval ? `${a.effective_interval} mo` : '—' }, ...COLS.slice(6)]}
           rows={rows}
           onRowClick={(a) => navigate(`#/activities/${a.id}`)}
           initialSort={{ key: 'ref', dir: 1 }}
