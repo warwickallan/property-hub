@@ -1,7 +1,7 @@
 PASS [p0] Dashboard is home; shows Not yet calculated before first run
 PASS [p0] Core Data: Area, Site under Area, two Rooms under Site
 PASS [p0] Equipment Kettle 001 created in Kitchen room
-PASS [p0] Activity saved and detail opened (#51)
+PASS [p0] Activity saved and detail opened (#77)
 PASS [p0] Activity shows linked Kettle 001 in scope
 PASS [p0] Uploaded document linked to activity, not verified on upload
 PASS [p0] One document linked in three contexts (activity, equipment, site)
@@ -18,44 +18,40 @@ PASS [p0] Reminder draft preview opens and is editable
 PASS [p0] Selected reminder exported as .eml draft (no send)
 PASS [p0] Site front sheet shows the activity and its document
 PASS [p0] Office-scoped picker does not offer Kitchen equipment
-PASS [p1] Baseline activity PH-C011 at PH-S003 is green before the journey
-PASS [p1] Inspection started as Draft with 0/30 answered (#3)
-PASS [p1] All 30 questions shown (30)
-PASS [p1] All five categories shown
-PASS [p1] Original question wording preserved
-PASS [p1] Unsaved changes indicator after answering
-PASS [p1] Draft saved
-PASS [p1] Draft resumes with saved answers and notes
-PASS [p1] Progress shows 2/30 and 28 outstanding
-PASS [p1] Create remedial action offered for the Issue
-PASS [p1] Critical warning explains effect at next Recalculate
-PASS [p1] Action PH-X003 · Critical · Open linked under CHK-002
-PASS [p1] Completion refused with unanswered questions listed
-PASS [p1] All 30 answered (30/30)
-PASS [p1] Inspection completed and locked
-PASS [p1] Creating the Critical action flagged changes pending
-PASS [p1] PH-C011 still green before Recalculate
-PASS [p1] PH-C011 red after Recalculate
-PASS [p1] Activity reason cites the Critical open action
-PASS [p1] Action shows source inspection question and linked activity
-PASS [p1] Action moved to In progress
-PASS [p1] Closing without closure details is refused
-PASS [p1] Action Done with closure details shown
-PASS [p1] Closing the action flagged changes pending
-PASS [p1] PH-C011 still red before Recalculate
-PASS [p1] PH-C011 green again after Recalculate
-PASS [p1] Actions register filters by status and priority
-PASS [p1] Actions CSV contains exactly the filtered row with closure details
+PASS [p1] Routine Fire Safety activity PH-C063 at PH-S004 found with no open visit
+PASS [p1] Dashboard row offers Start visit
+PASS [p1] Visit started and opened (#50)
+PASS [p1] Only the activity's checklist is shown: 8 Fire Safety questions, not 30
+PASS [p1] Original wording and the Activity → Visit chain are visible
+PASS [p1] Unsaved changes indicator
+PASS [p1] Visit resumes with saved answers
+PASS [p1] Raise remedial offered on the Issue
+PASS [p1] Remedial PH-X003 · Critical · Open shown under CHK-002
+PASS [p1] Complete modal offers outcome and proposed next due
+PASS [p1] Status Complete with Remedials and the blocking remedial is listed
+PASS [p1] Close Inspection button is disabled
+PASS [p1] Changes pending after recording work
+PASS [p1] Status unchanged before Recalculate
+PASS [p1] After Recalculate: red, 1 open remedial, latest visit Complete with Remedials
+PASS [p1] Remedial page shows Remedial → Inspection → Activity [Remedial PH-X003 Open → Inspection PH-V050 Inspection Complete with Remedials → Activity PH-C063 RPI]
+PASS [p1] Done without closure details refused
+PASS [p1] Resolving the final remedial closed the inspection automatically
+PASS [p1] Visit Closed with an auto-closed timeline entry
+PASS [p1] Closed visit is locked (reopen only)
+PASS [p1] Still red before Recalculate (no silent recalculation)
+PASS [p1] After Recalculate: compliant, latest visit Closed
+PASS [p1] Remedials register filters by status and priority
+PASS [p1] Remedials CSV = filtered row with closure details and visit
 PASS [p1] Activities CSV has the 5 filtered FRA rows
-PASS [p1] Inspection results CSV has 30 answers including the Issue
-PASS [p1] Inspection history lists seeded and new inspections
-PASS [p1] Printable front sheet renders without app chrome
+PASS [p1] Visits register lists the closed visit
+PASS [p1] Visit results CSV includes the Issue answer
+PASS [p1] Printable front sheet lists activities and visits
 PASS [p1] Print buttons hidden in print media
-PASS [p1] Inspection form has no horizontal page scroll at 390px
-PASS [p1] New action form fits at 390px
-PASS [p1] Dashboard has no horizontal page scroll at 390px (tables scroll inside their card)
+PASS [p1] Visit page has no horizontal page scroll at 390px
+PASS [p1] Dashboard has no horizontal page scroll at 390px
 PASS [p11] PH-C012 Gas Safety starts Overdue, next due 04/11/2026
-PASS [p11] Edit form shows calculated next due 09/11/2027 = last done + 12 months
+PASS [p11] Activity shows last work, last closure, interval, calculated next due, override and effective next due separately
+PASS [p11] Edit form shows calculated next due 09/11/2027
 PASS [p11] Next due is calculated, not a free field, unless Override is ticked
 PASS [p11] Save confirms and header flags Changes pending
 PASS [p11] Overview shows the new calculated next due
@@ -63,27 +59,32 @@ PASS [p11] Overview explains the snapshot is stale until Recalculate
 PASS [p11] Dashboard status unchanged before Recalculate
 PASS [p11] Reload shows the persisted next due
 PASS [p11] After Recalculate the Dashboard shows 09/11/2027 and no longer Overdue
-PASS [p11] Without a current-cycle certificate it shows Unknown / missing (not green)
-PASS [p11] Check form inherits activity type and location
+PASS [p11] Without verified paperwork for the new date it is Unknown / missing (not green)
+PASS [p11] Visit started from the activity; paperwork requirement shown
 PASS [p11] Proposed next due = performed date + interval
-PASS [p11] Saved check opens the Inspection / Check history
-PASS [p11] New check appears first with its verified certificate
-PASS [p11] Recording the check flags Changes pending
-PASS [p11] Status unchanged until Recalculate
-PASS [p11] After Recalculate PH-C012 is green (verified current certificate)
-PASS [p11] Calculation history uses full timestamps with seconds and a run count
-PASS [p11] Calculation history collapses 7 runs into 3 distinct results
-PASS [p11] Amend opens a correction form explaining the original is kept
-PASS [p11] Amendment requires a reason
-PASS [p11] History shows the superseded original and the amendment with its reason
-PASS [p11] Schedule changes log the manual edit, the check and the amendment
-PASS [p11] Start offers Routine or Compliance inspection
-PASS [p11] Cascading Area > Site > Type picker narrows to the one gas activity
-PASS [p11] Check saved with an unverified certificate
-PASS [p11] Unverified certificate does not make the activity green
-PASS [p11] Compliance checks register lists the new checks
-PASS [p11] Routine 30-point inspection still starts from the chooser
+PASS [p11] Completed without paperwork: Awaiting Evidence, Close blocked
+PASS [p11] Upload alone is not verification (still Awaiting Evidence)
+PASS [p11] After verifying the certificate the visit is ready to close
+PASS [p11] Inspection closed
+PASS [p11] Activity status unchanged until Recalculate
+PASS [p11] After Recalculate PH-C012 is compliant (closed visit with verified certificate)
+PASS [p11] Inspection history is the default history view, latest first
+PASS [p11] Calculation history uses full timestamps and a run count
+PASS [p11] Schedule changes log the manual edit and the visit
+PASS [v2] Main navigation: Dashboard, Inspections / Visits, Remedials, Equipment, Documents, Reminders
+PASS [v2] Admin navigation: People / Users, Property Details, Compliance Types, Checklists, Compliance Activities, Settings
+PASS [v2] Five routine checklists listed
+PASS [v2] Question counts 8/4/5/6/7
+PASS [v2] Three questions added; version bumped per change
+PASS [v2] Reordered questions
+PASS [v2] A question archived (not deleted)
+PASS [v2] Checklist duplicated
+PASS [v2] Types show Evidence / Certificate required (GAS yes, routine no)
+PASS [v2] Activity uses the new Gas checklist
+PASS [v2] Closed visit PH-V050 keeps the original wording and version
+PASS [v2] Compliance Activities register lives under Admin and shows checklists
 
 p0: 20 passed, 0 failed
-p1: 36 passed, 0 failed
-p11: 29 passed, 0 failed
+p1: 31 passed, 0 failed
+p11: 22 passed, 0 failed
+v2: 12 passed, 0 failed

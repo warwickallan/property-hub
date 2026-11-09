@@ -18,7 +18,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\portable\build-windows.ps1
 
 Default output: `C:\ClaudeStuff\Shared\handoff\property-hub-portable\Property-Hub-Portable-Windows-x64.zip`.
 For a new release, build into a versioned folder so the previous ZIP stays untouched, e.g.
-`-OutputFolder C:\ClaudeStuff\Shared\handoff\property-hub-portable\v0.4.0`.
+`-OutputFolder C:\ClaudeStuff\Shared\handoff\property-hub-portable\v0.5.0`.
 
 This command performs a typechecked Vite build, installs only production Node dependencies **into a temporary bundle**, checks native SQLite loading through the *bundled* Node executable and produces the ZIP.
 
@@ -33,7 +33,7 @@ $root = 'C:\path\to\extracted\Property-Hub-Portable-Windows-x64'
 & "$root\runtime\node.exe" .\portable\smoke-windows.mjs $root --upgrade-from 'C:\path\to\previous\Property-Hub-Portable-Windows-x64'
 ```
 
-**Upgrading from v0.3.x to v0.4.0:** close the app, extract v0.4.0 to a *new* folder and start it. The database in `%LOCALAPPDATA%\PropertyHub` upgrades in place on first start (additive migration 3). Existing dates are preserved. An activity whose stored next-due date differs from last done + interval is kept as an **Override**, labelled "Explicit next-due date entered before v0.4". Untick Override on the activity to switch it to the calculated date. Take a BACKUP first as usual.
+**Upgrading from v0.3.x to v0.5.0:** close the app, extract v0.5.0 to a *new* folder and start it. The database in `%LOCALAPPDATA%\PropertyHub` upgrades in place on first start (additive migration 3). Existing dates are preserved. An activity whose stored next-due date differs from last done + interval is kept as an **Override**, labelled "Next-due date entered before v0.5". Older routine 30-point inspections become visits flagged "Needs review" (same refs, answers and documents kept). Untick Override on the activity to switch it to the calculated date. Take a BACKUP first as usual.
 
 The smoke test creates isolated temporary directories, starts the app using only its bundled runtime, checks a clean no-demo database, all five compliance types, browser static serving, persistence, backup/verify, restore, and separate fictional demo data. No production/user records are touched. The builder's delivery ZIP has been smoke-tested after extraction.
 
@@ -54,3 +54,4 @@ The default browser opens `http://127.0.0.1:3001`. Keep the console window open.
 The portable build is **for evaluation with fictional data** until employer IT approval for an unsigned executable, local storage and backup location. Backups are not encrypted and the application has no login or account separation. No real emails are transmitted (demo draft/outbox only). Do not store addresses of refuges, residents' personal data or live compliance evidence on an unapproved work machine.
 
 Never put `data/propertyhub.db`, uploaded files, email drafts, backups, private information or zip bundles into Git source control. This is a build script, not a public release workflow.
+

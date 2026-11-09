@@ -33,7 +33,8 @@ describe('seed + schema', () => {
     const core = ok(await api.get('/api/core'));
     expect(core.areas).toHaveLength(2);
     expect(core.sites).toHaveLength(10);
-    expect(core.types.map((t: { code: string }) => t.code).sort()).toEqual(['EICR', 'FRA', 'GAS', 'LEG', 'PAT']);
+    // Five statutory types plus (V2) the configurable routine visual-inspection type.
+    expect(core.types.map((t: { code: string }) => t.code).sort()).toEqual(['EICR', 'FRA', 'GAS', 'LEG', 'PAT', 'RPI']);
     expect(core.areas[0].code).toBe('PH-A001');
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r: any) => r.name);
     expect(tables).not.toContain('properties');
@@ -162,7 +163,9 @@ describe('acceptance-critical workflow', () => {
 
   it('Critical action makes activity red at next recalculation', async () => {
     ok(await api.put(`/api/activities/${ctx.act.id}`).send({ next_due_on: '2027-06-01' }));
-    ok(await api.post('/api/actions').send({ activity_id: ctx.act.id, title: 'Kettle cable damaged', priority: 'Critical' }), 201);
+    // V2: a remedial belongs to an inspection/visit of the activity.
+    const visit = ok(await api.post('/api/visits').send({ activity_id: ctx.act.id, provider_name: 'Demo PAT tester' }), 201);
+    ok(await api.post('/api/actions').send({ visit_id: visit.id, title: 'Kettle cable damaged', priority: 'Critical' }), 201);
     ok(await api.post('/api/recalculate'));
     expect(ok(await api.get(`/api/activities/${ctx.act.id}`)).status_reason).toMatch(/Critical/);
   });

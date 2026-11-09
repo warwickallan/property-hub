@@ -1,17 +1,16 @@
 # Property Hub
 
-A local-first, **single-operator property compliance tracker** (v0.4.0: v0.3 model, P0 + P1 + P1.1). It covers:
+A local-first, **single-operator property compliance tracker** (v0.5.0, "V2 workflow"). It separates two things:
 
-- the Area › Site › Room › Equipment hierarchy;
-- scheduled Compliance Activities;
-- one central document library with reusable links;
-- **manual** compliance recalculation;
-- compliance inspections/checks per activity, with a calculated next due and traceable amendments;
-- routine 30-point inspections with remedial actions;
-- CSV exports and a printable site front sheet;
-- reminder drafts you review before anything goes out.
+- **configuring recurring obligations**, which happens in Admin: Compliance Types → Checklists → Compliance Activities;
+- **doing the work**, which happens in Inspections / Visits → Remedials → evidence → closure.
 
-Fictional demo data only.
+Statuses only change on a **manual Recalculate**. All data is fictional.
+
+```
+Area → Site → Room → Equipment
+Compliance Type → Checklist Template → Compliance Activity → Inspection / Visit → Remedial(s)
+```
 
 ## Run it (one command)
 
@@ -24,119 +23,105 @@ npm install && npm start
 Then open **http://localhost:3001**. On first start the app creates `data/propertyhub.db` and seeds fictional demo data:
 
 - 2 Areas, 10 Sites, rooms and equipment;
-- 5 compliance types and 51 activities;
-- one historical compliance check behind each seeded certificate;
-- 1 completed and 1 draft routine inspection.
+- the five statutory types plus a routine visual-inspection type, with five routine checklists;
+- 77 activities;
+- visits in every lifecycle state.
 
-Existing P0/P1 databases upgrade automatically: migrations 2 and 3 are additive, and existing dates are never changed. The server listens on 127.0.0.1 only. It has no authentication, so don't expose it on a network.
+The server listens on 127.0.0.1 only. It has no authentication.
 
 | Command | Purpose |
 |---|---|
 | `npm start` | Build the UI and serve app + API on :3001 |
-| `npm run dev` | Hot-reload dev mode (UI on :5173, API on :3001) |
-| `npm test` | API, rule, schedule and CSV tests (Vitest, in-memory DB): 54 tests |
-| `npm run e2e` | Build, start the app on a throwaway data folder, and drive the P0, P1 and P1.1 browser journeys in headless Chrome |
-| `npm run check` | Typecheck + tests + build + browser journeys (full gate) |
-| `npm run typecheck` | TypeScript check |
+| `npm run dev` | Hot-reload dev mode (UI :5173, API :3001) |
+| `npm test` | Unit/API tests (Vitest, in-memory DB): 54 tests |
+| `npm run e2e` | Build, start on a throwaway data folder, run the P0, P1, scheduling and V2 browser journeys in headless Chrome |
+| `npm run check` | Typecheck + tests + build + browser journeys |
 | `npm run seed` | **Reset** the database to fresh demo data |
 
-`PH_DATA_DIR` and `PORT` override the data folder and port. For `npm run e2e`, `CHROME_PATH` points it at a Chrome or Edge executable; installed Chrome, Edge or Chromium are found automatically. Screenshots, downloaded CSVs and `results.txt` are written to `e2e/output/`. A curated set is kept in [docs/screenshots](docs/screenshots), and the latest run is in [docs/e2e-results.txt](docs/e2e-results.txt).
+`PH_DATA_DIR`/`PORT` override the data folder and port. `CHROME_PATH` selects the browser for e2e. Output goes to `e2e/output/` (git-ignored). Curated evidence is in [docs/screenshots](docs/screenshots) and [docs/e2e-results.txt](docs/e2e-results.txt).
 
-## Portable Windows ZIP (no admin rights on target)
+## Portable Windows ZIP (no admin rights)
 
-For a self-contained Windows x64 edition with bundled Node runtime, a **clean operational launcher**, a separate fictional Demo launcher and local Backup/Restore shortcuts, see [Portable Windows handover](docs/PORTABLE_WINDOWS.md).
+See [docs/PORTABLE_WINDOWS.md](docs/PORTABLE_WINDOWS.md). Build with `portable/build-windows.ps1 -OutputFolder <folder>`. To smoke-test an extracted ZIP, run `runtime\node.exe portable\smoke-windows.mjs <folder> [--upgrade-from <previous release>]`. Operational data lives in `%LOCALAPPDATA%\PropertyHub\data`, outside the app folder.
 
-Build from a Windows x64 developer machine with `powershell -NoProfile -File portable/build-windows.ps1 -OutputFolder <folder>`. Smoke-test an extracted ZIP with `runtime\node.exe portable\smoke-windows.mjs <extracted folder> [--upgrade-from <previous extracted release>]`. On the **target laptop**, simply extract the ZIP and double-click `START Property Hub.cmd`: no Node/npm installation, no elevated rights and no network service. Corporate execution policies may still require IT approval.
+## The workflow
 
-Portable operational records live in `%LOCALAPPDATA%\PropertyHub\data` **outside** the extracted app folder; demo records use `%LOCALAPPDATA%\PropertyHub\demo-data`. Keep live data and backups out of Git. Do not import real sensitive accommodation data before work-device approval.
+**Daily work.** The main menu is Dashboard · Inspections / Visits · Remedials · Equipment · Documents · Reminders.
 
-## What's built
+1. **Dashboard**: operational due work and compliance status.
+   - Filter by Area › Site › Room, type, status, responsible person, due dates, visit state, remedial state and evidence state.
+   - Each row has **Start visit** or **Open PH-V…**.
+2. **Inspection / Visit**: one occurrence of a Compliance Activity.
+   - It records the performed date, inspector and/or provider, notes, the activity's checklist answers (Pass / Issue / Not applicable / Not checked, plus notes), remedials and evidence documents.
+   - The checklist **questions and version are frozen** into the visit. Later edits to the checklist never change history.
+3. **Complete Inspection** records the work outcome: *Inspection Complete* or *Inspection Complete with Remedials*.
+   - It updates the activity schedule: next due = performed date + interval, unless you set a reasoned override.
+   - It does **not** make the activity compliant.
+4. **Lifecycle**: Scheduled / In Progress → Inspection Complete / Complete with Remedials → Awaiting Evidence → Closed.
+   - Completion time and closure time are stored separately.
+5. **Close Inspection** is disabled, with the blocking items listed, until all of these hold:
+   - the work is complete;
+   - every remedial is Done;
+   - if the Compliance Type has **Evidence / Certificate required** ticked, a linked document is explicitly marked **Reviewed/Verified**. Uploading alone never counts.
+6. **Automatic closure from remedials**:
+   - When the final remedial is Done and no paperwork is outstanding, the visit **closes automatically**.
+   - If paperwork is still missing or unverified, it moves to **Awaiting Evidence** instead.
+   - A visit completed without remedials is closed manually.
+7. **Reopening**, of the work or of a closure, needs a reason. It is recorded in the visit's timeline.
+   - Evidence of a closed visit cannot be unlinked or un-verified.
+   - Reopening the work restores the schedule the visit had set.
+8. **Remedials** (formerly Actions):
+   - Each belongs to a visit, and optionally a checklist question, room and equipment.
+   - The lifecycle is Open → In progress → Done, and Done needs closure details.
+   - An open **Critical** remedial makes its activity red at the **next** Recalculate. Resolving remedials never recalculates RAG on its own.
+9. **Recalculate Compliance** (header) is the only thing that changes RAG. Saves, completions and closures show *Changes pending*.
 
-### P0: core compliance
-- **Dashboard** (home):
-  - KPI tiles;
-  - cascading Area › Site › Room filters, plus type, status, responsible person, equipment, due range and search;
-  - views: All, Overdue, Due Soon, By Location, By Type, Missing Evidence.
-- **Compliance Activities**: register with create and edit. Each activity has one type at Area, Site or Room level. Equipment is optional but must sit within that scope.
-- **Equipment** register. **Documents**: upload once, link anywhere; Reviewed/Verified is a separate manual tick.
-- **Site front sheet** (Location detail).
-- **Admin / Setup**: People (contacts only, no logins), Core Data, Compliance Types, Settings.
-- **Recalculate Compliance** is the only thing that changes statuses. Saves show *Changes pending recalculation*. Dates use Europe/London.
-- **Reminders** come only from Recalculate. You preview them, then export `.eml` or demo-send to `data/outbox`. **Nothing is ever really emailed.**
+**Activity status vs inspection status.** These are separate, and the status reasons say which applies:
+- Overdue (this always wins)
+- Inspection complete with remedials outstanding
+- Awaiting required evidence
+- Inspection complete, not yet closed
+- Compliant / verified
+- Not applicable / unknown
 
-### P1: inspections, actions, exports
-- **Routine inspections** (`Inspections`, or **Start inspection** on a Site or Room page):
-  - all 30 questions from `data/inspection_template_seed.json`, with exact wording and the 5 categories;
-  - scope is a Site, or one Room in it; record the date and inspector;
-  - each question takes Pass / Issue / Not applicable / Not checked, plus notes;
-  - save a draft, resume later, see progress and outstanding questions (click to jump to one);
-  - complete (every question must be answered), or reopen to correct;
-  - full history per Site or Room;
-  - supplementary documents come from the central library;
-  - a banner states that a routine inspection is **not** a statutory certificate. Inspections never change compliance status or mark changes pending.
-- **Remedial actions** (`Actions`):
-  - an **Issue** answer offers *Create remedial action*;
-  - fields: ref (`PH-X###`), title, description, priority (Low…Critical), owner/contact, due date, status, notes, room;
-  - the source inspection and question are recorded;
-  - optional link to a Compliance Activity at the same Site or Area. Activities elsewhere are rejected.
-  - Lifecycle: Open → In progress → Done. Done requires closure details and a closed-on date. Reopening clears them.
-  - The register filters by Area/Site/Room, priority, status, owner, overdue only and due-by date.
-- **Critical rule**: an open Critical action linked to an Activity turns it red at the **next** manual Recalculate. Creating, closing or reopening an action only marks changes pending; the effect appears or disappears at the following Recalculate.
-- **Exports**:
-  - **Export CSV** on the Dashboard and Activities register exports exactly the rows the current filters show;
-  - the Actions register exports its filtered list;
-  - completed inspection results export as CSV, one row per question.
-  - CSVs are UTF-8 with a BOM for Excel, and formula-injection safe.
-- **Printable Site front sheet** (`Printable front sheet` on a Site): activities sorted by risk, open actions, recent inspections and documents. It shows when status was last calculated and warns if changes are pending.
-- **UX**:
-  - reference IDs no longer wrap; tables have zebra rows;
-  - on phones the nav is a single scrollable row, forms and grids stack, and tap targets are larger;
-  - inputs use 16px text so iOS doesn't zoom on focus.
+A still-unclosed newer visit never makes an activity look compliant.
 
-### P1.1: schedule fix and compliance inspections / checks
-- **Fixed defect (PH-C012 Gas Safety)**. There were two root causes:
-  - Editing *Last done* never re-derived *Next due*, because the stored date always won.
-  - The previous cycle's certificate expiry still capped the due date after the dates were edited.
-- **Schedule now works like this:**
-  - next due = last inspection date + interval (calendar months, clamped at month end), calculated and saved;
-  - an optional **Override** needs a date and a reason, and is shown as *Override* everywhere;
-  - Recalculate uses the saved effective date;
-  - only certificates issued in the current cycle count as evidence or cap the due date;
-  - a type's default interval change re-derives the activities that follow it.
-- **Compliance Inspection / Check**:
-  - Start it from **Record Inspection / Check** on any activity, or from **Inspections → Start inspection → Compliance Inspection / Check**, where an Area › Site › Room / Type picker finds the activity. Type and location are inherited from the activity.
-  - Record the performed date, inspector and/or engineer, outcome (Satisfactory / with advisories / Unsatisfactory / Not completed) and notes.
-  - Attach a certificate by uploading it or picking it from the library. Verification is a separate tick, so an unverified certificate never turns the activity green.
-  - The form proposes next due = performed date + interval, with an optional override (date and reason).
-  - Saving keeps an immutable event and updates the activity's last inspection date and next due. It flags Changes pending and does **not** recalculate.
-  - *Not completed* keeps the record without moving the schedule. *Unsatisfactory* makes the activity red at the next Recalculate.
-  - A record dated before the current last inspection is kept as history only.
-- **Amendments**: *Amend…* creates a new record that supersedes the original and requires a reason. The original stays visible, marked *Superseded*. Checks have no edit or delete.
-- **Activity history**:
-  - *Inspection / Check history* is the default view, latest first.
-  - *Schedule changes* logs manual edits, recorded checks and amendments, with before → after.
-  - *Calculation history* collapses identical consecutive Recalculate snapshots and shows full timestamps to the second.
-- The routine 30-point inspection is unchanged and still offered from the same Start button.
+**Activity history.**
+- *Inspection history* (default) lists the actual visits, latest first.
+- *Schedule changes* shows each change before → after, with its source.
+- *Calculation history* collapses identical Recalculate runs and shows full timestamps.
 
-### Not built yet
-- **Service charges (P2)**: placeholder page only.
-- **Document versions/revision history**: the `supersedes_document_id` column exists but has no UI.
-- **Bulk/other exports**: there is no PDF export (use the browser's Print → Save as PDF on the front sheet) and no Equipment or Documents CSV.
-- **Inspection templates**: they can't be edited in the UI. The 30-question template stays fixed as imported.
+**Admin / Setup.**
+- **People / Users**
+- **Property Details** (Area › Site › Room)
+- **Compliance Types**, including the *Evidence / Certificate required* checkbox
+- **Checklists**: create, edit, duplicate, reorder, archive; questions are mandatory or optional; every change bumps the version
+- **Compliance Activities**: type, checklist of that type, one location, interval, responsible person, calculated next due or reasoned override
+- **Settings**
 
-## Specs
+**Routine checklists.** The 30 original questions are imported verbatim as five checklists (Fire Safety 8, Security 4, Gas/Electrical/Utilities 5, Health & Wellbeing 6, General Property Safety 7). They sit under a configurable *Routine Property Inspection (visual)* type, with no certificate requirement. They are not mapped onto PAT/FRA/Gas/Legionella/EICR. Each routine activity has its own schedule.
 
-1. [docs/OPUS_START_HERE.md](docs/OPUS_START_HERE.md): build mandate
-2. [docs/PROPERTYHUB_UI_DATA_MODEL_V03.md](docs/PROPERTYHUB_UI_DATA_MODEL_V03.md): authoritative v0.3 model
-3. [docs/PROPERTYHUB_BUILD_SPEC.md](docs/PROPERTYHUB_BUILD_SPEC.md): legacy v0.2 (date and reminder detail)
+**Also included:**
+- **Exports**: CSV of the filtered activities, remedials and completed visit results.
+- **Printable Site front sheet**.
+- **Reminders**: drafts only (demo outbox / `.eml`). Nothing is ever really emailed.
 
-## Data and boundaries
+## Upgrading existing databases
 
-The repository is source control, **not a document vault**. These are git-ignored:
+Migration 3 is additive and runs automatically.
+- **Schedules:** stored dates are preserved. A stored next due that differs from last done + interval is kept as a labelled **Override**.
+- **Routine inspections:** v0.3 routine 30-point inspections are copied into visits with the **same ids and refs**, so document links stay valid. Their answers and remedial links are kept. They are **not** attached to an activity and are **flagged "Needs review"**. Link each one from the visit page.
+- **Old records:** the original tables are kept untouched.
+- **Standalone actions:** these become remedials flagged for review. They keep their activity link.
 
-- `data/propertyhub.db`
-- `data/uploads/`
-- `data/outbox/`
-- `e2e/output/`
+## Not built yet
+- Service charges (P2 placeholder).
+- Document version/revision UI.
+- PDF export (use Print → Save as PDF); Equipment/Documents CSV.
+- Per-question evidence attachments: evidence is linked to the visit as a whole.
 
-To back up, stop the app and copy `data/`. Do not enter real addresses, residents or certificates. Pushing, deployment and real email sending all require explicit instruction from the project owner.
+## Specs and data boundaries
+
+The specs are [docs/OPUS_START_HERE.md](docs/OPUS_START_HERE.md) and [docs/PROPERTYHUB_UI_DATA_MODEL_V03.md](docs/PROPERTYHUB_UI_DATA_MODEL_V03.md). V2 changes are in this README.
+
+The repository is source control, **not a document vault**. `data/propertyhub.db`, `data/uploads/`, `data/outbox/` and `e2e/output/` are git-ignored. Pushing, deployment and real email require explicit instruction from the project owner.

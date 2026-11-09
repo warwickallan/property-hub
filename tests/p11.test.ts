@@ -60,12 +60,12 @@ describe('date arithmetic', () => {
 describe('PH-C012 Gas Safety date edit (operator defect)', () => {
   let c12: any;
 
-  it('seeded PH-C012 is overdue with a derived (not override) schedule and a historical check', async () => {
+  it('seeded PH-C012 is overdue with a derived (not override) schedule set by a closed historical visit', async () => {
     ok(await api.post('/api/recalculate'));
     c12 = await act('PH-C012');
     expect(c12).toMatchObject({ type_code: 'GAS', site_code: 'PH-S003', last_done_on: '2025-11-04', next_due_on: '2026-11-04', next_due_override: 0, status: 'red' });
     expect(c12.status_reason).toBe('Overdue by 5 days');
-    expect(c12.latest_check).toMatchObject({ outcome: 'Satisfactory', performed_on: '2025-11-04' });
+    expect(c12).toMatchObject({ schedule_visit_status: 'closed', schedule_visit_performed: '2025-11-04' });
   });
 
   it('editing Last done derives and persists the new next due, flags pending, leaves the snapshot alone', async () => {
@@ -88,6 +88,7 @@ describe('PH-C012 Gas Safety date edit (operator defect)', () => {
     expect(a.status).not.toBe('red');
     expect(a.status).toBe('grey'); // gas certificate from 2025 is not evidence for the new cycle
     expect(a.status_reason).toMatch(/Required evidence missing for the current cycle/);
+    expect(a.schedule_visit_id).toBeNull(); // a manual date edit is not a recorded visit
     expect(await pending()).toBe(false);
   });
 
@@ -113,124 +114,7 @@ describe('PH-C012 Gas Safety date edit (operator defect)', () => {
   });
 });
 
-describe('compliance inspection / check workflow', () => {
-  const ctx: Record<string, any> = {};
-
-  it('records a Gas Safety check with an uploaded (unverified) certificate and updates the schedule, not the status', async () => {
-    ok(await api.post('/api/recalculate'));
-    ctx.a = await act('PH-C017'); // PH-S004 Plant Room gas, in date
-    ctx.before = ctx.a.status;
-    const users = ok(await api.get('/api/users'));
-    ctx.engineer = users.find((u: any) => u.role_label === 'Team Leader');
-    const doc = ok(await api.post('/api/documents').attach('file', Buffer.from('%PDF-1.4 fictional gas safety record 2026'), 'gas-safety-2026.pdf'), 201);
-    expect(doc.verified_by_operator).toBe(0);
-    const proposal = ok(await api.get(`/api/activities/${ctx.a.id}/check-proposal?performed_on=2026-11-02`));
-    expect(proposal).toEqual({ interval_months: 12, proposed_next_due: '2027-11-02' });
-
-    ctx.check = ok(await api.post('/api/checks').send({
-      activity_id: ctx.a.id, performed_on: '2026-11-02', inspector_user_id: ctx.engineer.id, provider_name: 'Demo Gas Engineer Ltd (fictional)',
-      outcome: 'Satisfactory', notes: 'Boiler serviced, CO alarm tested (demo)', certificate_document_id: doc.id, certificate_valid_until: '2027-11-02',
-    }), 201);
-    expect(ctx.check).toMatchObject({ outcome: 'Satisfactory', proposed_next_due: '2027-11-02', next_due_on: '2027-11-02', schedule_applied: 1,
-      previous_last_done: ctx.a.last_done_on, previous_next_due: ctx.a.next_due_on, certificate_verified: 0, activity_ref: 'PH-C017', type_code: 'GAS' });
-    expect(ctx.check.ref).toMatch(/^PH-K\d{3}$/);
-    const a = ok(await api.get(`/api/activities/${ctx.a.id}`));
-    expect(a).toMatchObject({ last_done_on: '2026-11-02', next_due_on: '2027-11-02', next_due_override: 0, schedule_check_id: ctx.check.id, status: ctx.before });
-    expect(await pending()).toBe(true);
-    // certificate linked once to the activity as evidence, issued on the performed date
-    const docs = ok(await api.get(`/api/documents?entity_kind=activity&entity_id=${ctx.a.id}`));
-    expect(docs.find((d: any) => d.id === doc.id)).toMatchObject({ link_role: 'certificate', issued_on: '2026-11-02', valid_until: '2027-11-02' });
-    ctx.doc = doc;
-  });
-
-  it('an unverified certificate never produces green; verifying it does, at the next Recalculate', async () => {
-    ok(await api.post('/api/recalculate'));
-    let a = ok(await api.get(`/api/activities/${ctx.a.id}`));
-    expect(a.status).toBe('grey');
-    expect(a.status_reason).toMatch(/not reviewed\/verified/);
-    expect(a.snap_due_on).toBe('2027-11-02');
-    ok(await api.put(`/api/documents/${ctx.doc.id}`).send({ verified_by_operator: true }));
-    expect(ok(await api.get(`/api/activities/${ctx.a.id}`)).status).toBe('grey'); // unchanged until Recalculate
-    ok(await api.post('/api/recalculate'));
-    a = ok(await api.get(`/api/activities/${ctx.a.id}`));
-    expect(a.status).toBe('green');
-  });
-
-  it('the real inspection appears in history (latest first) separately from calculation snapshots', async () => {
-    const h = ok(await api.get(`/api/activities/${ctx.a.id}/history`));
-    expect(h.checks[0]).toMatchObject({ id: ctx.check.id, performed_on: '2026-11-02' });
-    expect(h.checks[1].performed_on < h.checks[0].performed_on).toBe(true); // seeded earlier check
-    expect(h.schedule[0]).toMatchObject({ source: 'check', check_id: ctx.check.id, new_last_done: '2026-11-02' });
-    expect(h.snapshots.length).toBeGreaterThanOrEqual(3);
-    expect(new Set(h.snapshots.map((s: any) => s.run_id)).size).toBe(h.snapshots.length); // one snapshot per manual run
-    expect(h.snapshots[0].run_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/); // full timestamp available to the UI
-  });
-
-  it('amends a check through a traceable superseding record; the original is preserved', async () => {
-    expect((await api.post(`/api/checks/${ctx.check.id}/amend`).send({ performed_on: '2026-11-01' })).status).toBe(400); // reason required
-    const original = db.prepare('SELECT * FROM compliance_checks WHERE id = ?').get(ctx.check.id) as any;
-    const am = ok(await api.post(`/api/checks/${ctx.check.id}/amend`).send({ performed_on: '2026-11-01', amendment_reason: 'Engineer record shows 01/11 (demo)' }), 201);
-    expect(am).toMatchObject({ amends_check_id: ctx.check.id, amendment_reason: 'Engineer record shows 01/11 (demo)', performed_on: '2026-11-01',
-      next_due_on: '2027-11-01', outcome: 'Satisfactory', certificate_document_id: ctx.doc.id, schedule_applied: 1 });
-    const after = db.prepare('SELECT * FROM compliance_checks WHERE id = ?').get(ctx.check.id) as any;
-    expect({ ...after, superseded_by_id: null }).toEqual(original); // nothing rewritten except the pointer
-    expect(after.superseded_by_id).toBe(am.id);
-    expect(ok(await api.get(`/api/activities/${ctx.a.id}`))).toMatchObject({ last_done_on: '2026-11-01', next_due_on: '2027-11-01', schedule_check_id: am.id });
-    expect((await api.post(`/api/checks/${ctx.check.id}/amend`).send({ amendment_reason: 'again' })).status).toBe(409);
-    const h = ok(await api.get(`/api/activities/${ctx.a.id}/history`));
-    expect(h.schedule[0]).toMatchObject({ source: 'amendment', check_id: am.id });
-    expect(h.schedule[0].note).toMatch(new RegExp(`Amends ${ctx.check.ref}`));
-    // No in-place edit or delete routes exist for checks
-    expect((await api.put(`/api/checks/${am.id}`).send({ outcome: 'Unsatisfactory' })).status).toBe(404);
-    expect((await api.delete(`/api/checks/${am.id}`)).status).toBe(404);
-    ctx.amended = am;
-  });
-
-  it('amending the outcome to Not completed restores the schedule from before the original check', async () => {
-    const before = ok(await api.get(`/api/activities/${ctx.a.id}`));
-    const am2 = ok(await api.post(`/api/checks/${ctx.amended.id}/amend`).send({ outcome: 'Not completed', amendment_reason: 'Visit aborted, no access (demo)' }), 201);
-    const a = ok(await api.get(`/api/activities/${ctx.a.id}`));
-    expect(a.last_done_on).toBe(ctx.check.previous_last_done);
-    expect(a.next_due_on).toBe(ctx.check.previous_next_due);
-    expect(a.last_done_on).not.toBe(before.last_done_on);
-    expect(am2.schedule_applied).toBe(0);
-  });
-
-  it('Not completed checks keep history without moving the schedule; Unsatisfactory turns red at the next Recalculate', async () => {
-    const a0 = await act('PH-C022');
-    const nc = ok(await api.post('/api/checks').send({ activity_id: a0.id, performed_on: TODAY, provider_name: 'Demo contractor (fictional)', outcome: 'Not completed', notes: 'No access' }), 201);
-    expect(nc.schedule_applied).toBe(0);
-    expect(ok(await api.get(`/api/activities/${a0.id}`))).toMatchObject({ last_done_on: a0.last_done_on, next_due_on: a0.next_due_on });
-
-    ok(await api.post('/api/recalculate'));
-    const before = ok(await api.get(`/api/activities/${a0.id}`)).status;
-    const bad = ok(await api.post('/api/checks').send({ activity_id: a0.id, performed_on: TODAY, provider_name: 'Demo contractor (fictional)', outcome: 'Unsatisfactory', notes: 'Flue defect (demo)' }), 201);
-    expect(ok(await api.get(`/api/activities/${a0.id}`))).toMatchObject({ last_done_on: TODAY, next_due_on: '2027-11-09', status: before });
-    ok(await api.post('/api/recalculate'));
-    const a = ok(await api.get(`/api/activities/${a0.id}`));
-    expect(a.status).toBe('red');
-    expect(a.status_reason).toBe(`Latest check ${bad.ref} (09/11/2026) was unsatisfactory`);
-  });
-
-  it('a retrospective check older than the current last done is kept as history only', async () => {
-    const a0 = await act('PH-C001');
-    const old = ok(await api.post('/api/checks').send({ activity_id: a0.id, performed_on: '2025-01-10', provider_name: 'Archive entry (demo)', outcome: 'Satisfactory' }), 201);
-    expect(old.schedule_applied).toBe(0);
-    expect(ok(await api.get(`/api/activities/${a0.id}`))).toMatchObject({ last_done_on: a0.last_done_on, next_due_on: a0.next_due_on });
-  });
-
-  it('validates check input', async () => {
-    const a0 = await act('PH-C001');
-    const base = { activity_id: a0.id, performed_on: TODAY, provider_name: 'X', outcome: 'Satisfactory' };
-    expect((await api.post('/api/checks').send({ ...base, performed_on: '2026-11-10' })).status).toBe(400);
-    expect((await api.post('/api/checks').send({ ...base, provider_name: '' })).status).toBe(400);
-    expect((await api.post('/api/checks').send({ ...base, outcome: 'Pass' })).status).toBe(400);
-    expect((await api.post('/api/checks').send({ ...base, next_due_override: true, next_due_on: '2027-01-01' })).status).toBe(400); // reason
-    const o = ok(await api.post('/api/checks').send({ ...base, next_due_override: true, next_due_on: '2027-03-31', override_reason: 'Align with annual contract (demo)' }), 201);
-    expect(o).toMatchObject({ next_due_override: 1, next_due_on: '2027-03-31', proposed_next_due: '2027-11-09' });
-    expect(ok(await api.get(`/api/activities/${a0.id}`))).toMatchObject({ next_due_on: '2027-03-31', next_due_override: 1 });
-  });
-
+describe('type default interval', () => {
   it('changing a type default interval re-derives activities that follow it', async () => {
     const pat = ok(await api.get('/api/types')).find((t: any) => t.code === 'PAT');
     const a0 = await act('PH-C003');

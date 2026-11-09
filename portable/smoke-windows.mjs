@@ -62,7 +62,9 @@ try {
   let server=await start(false);
   let core=await req('/api/core');
   ok(core.areas.length===0 && core.sites.length===0,'Clean launcher creates no fictional properties');
-  ok(core.types.length===5,'Five configurable compliance types seeded in clean database');
+  ok(core.types.length===6 && core.types.some(t=>t.code==='RPI'),'Five statutory types plus the routine inspection type in a clean database');
+  const cls=await req('/api/checklists');
+  ok(cls.filter(c=>c.type_code==='RPI').map(c=>c.item_count).sort().join(',')==='4,5,6,7,8','Five routine checklists (8/4/5/6/7 questions) in a clean database');
   const res=await fetch(base+'/');
   ok(res.ok && (await res.text()).includes('<div id="root">'),'Built React UI served without npm');
   await req('/api/areas',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:'Portable Smoke Test Area'})});
@@ -87,16 +89,25 @@ try {
   server=await start(true);
   core=await req('/api/core');
   ok(core.sites.length===10,'Separate Demo launcher seeds ten fictional sites');
-  // P1.1: record a compliance check against a demo activity through the bundled runtime.
+  // V2: full visit lifecycle on a demo Gas activity through the bundled runtime (paperwork required).
   const status=await req('/api/status');
   ok(/^\d+\.\d+\.\d+$/.test(status.version),'Version reported: '+status.version);
-  const acts=await req('/api/activities');
-  const gas=acts.find(a=>a.ref==='PH-C012');
-  const check=await req('/api/checks',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
-    activity_id:gas.id,performed_on:status.today,provider_name:'Smoke test engineer (fictional)',outcome:'Satisfactory'})});
+  const post=(u,b)=>req(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b)});
+  const gas=(await req('/api/activities')).find(a=>a.ref==='PH-C012');
+  const visit=await post('/api/visits',{activity_id:gas.id,provider_name:'Smoke test engineer (fictional)'});
+  const done=await post('/api/visits/'+visit.id+'/complete',{outcome:'complete'});
+  ok(done.status==='awaiting_evidence' && done.blockers.some(b=>b.code==='evidence'),'Completed visit awaits required evidence');
+  const blocked=await fetch(base+'/api/visits/'+visit.id+'/close',{method:'POST'});
+  ok(blocked.status===409,'Close refused without verified paperwork');
+  const fd=new FormData();
+  fd.append('file',new Blob(['%PDF-1.4 smoke certificate '+Date.now()],{type:'application/pdf'}),'smoke-cert.pdf');
+  fd.append('entity_kind','inspection');fd.append('entity_id',String(visit.id));
+  const doc=await (await fetch(base+'/api/documents',{method:'POST',body:fd})).json();
+  await req('/api/documents/'+doc.id,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({verified_by_operator:true})});
+  const closed=await post('/api/visits/'+visit.id+'/close',{});
   const after=await req('/api/activities/'+gas.id);
-  ok(check.ref.startsWith('PH-K') && after.last_done_on===status.today && after.next_due_on>status.today,'Compliance check recorded and schedule updated');
-  ok((await req('/api/status')).pending===true,'Recording a check flags changes pending (no automatic recalculation)');
+  ok(closed.status==='closed' && after.last_done_on===status.today && after.next_due_on>status.today,'Visit closed after verifying evidence; schedule updated');
+  ok((await req('/api/status')).pending===true,'Changes pending: no automatic recalculation');
   await stop(server);
   // Optional upgrade test: start the PREVIOUS release on a throwaway folder, then this release on the same database.
   const prevIdx=process.argv.indexOf('--upgrade-from');
@@ -116,6 +127,10 @@ try {
     ok(newC12.next_due_on===oldC12.next_due_on && newC12.last_done_on===oldC12.last_done_on && newC12.next_due_override===0,
       'Upgrade keeps existing dates and classifies the schedule as calculated');
     ok((await req('/api/core')).sites.length===10,'Upgrade keeps all existing records');
+    const upVisits=await req('/api/visits');
+    const legacy=upVisits.filter(v=>v.needs_review);
+    ok(legacy.length>=2 && legacy.every(v=>/^PH-I/.test(v.ref)),'Older routine inspections preserved as visits and flagged for review ('+legacy.map(v=>v.ref).join(', ')+')');
+    ok((await req('/api/actions')).every(a=>/^PH-X/.test(a.ref)),'Older actions preserved as remedials');
     await stop(upgraded);
   }
   const prodDb=path.join(root,'data','propertyhub.db');
