@@ -17,6 +17,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\portable\build-windows.ps1
 ```
 
 Default output: `C:\ClaudeStuff\Shared\handoff\property-hub-portable\Property-Hub-Portable-Windows-x64.zip`.
+For a new release, build into a versioned folder so the previous ZIP stays untouched, e.g.
+`-OutputFolder C:\ClaudeStuff\Shared\handoff\property-hub-portable\v0.4.0`.
 
 This command performs a typechecked Vite build, installs only production Node dependencies **into a temporary bundle**, checks native SQLite loading through the *bundled* Node executable and produces the ZIP.
 
@@ -27,7 +29,11 @@ The target laptop only receives the ZIP. It does **not** run npm or any build pr
 ```powershell
 $root = 'C:\path\to\extracted\Property-Hub-Portable-Windows-x64'
 & "$root\runtime\node.exe" .\portable\smoke-windows.mjs $root
+# optional: prove an older release's database upgrades cleanly (uses temporary data only)
+& "$root\runtime\node.exe" .\portable\smoke-windows.mjs $root --upgrade-from 'C:\path\to\previous\Property-Hub-Portable-Windows-x64'
 ```
+
+**Upgrading from v0.3.x to v0.4.0:** close the app, extract v0.4.0 to a *new* folder and start it. The database in `%LOCALAPPDATA%\PropertyHub` upgrades in place on first start (additive migration 3). Existing dates are preserved. An activity whose stored next-due date differs from last done + interval is kept as an **Override**, labelled "Explicit next-due date entered before v0.4". Untick Override on the activity to switch it to the calculated date. Take a BACKUP first as usual.
 
 The smoke test creates isolated temporary directories, starts the app using only its bundled runtime, checks a clean no-demo database, all five compliance types, browser static serving, persistence, backup/verify, restore, and separate fictional demo data. No production/user records are touched. The builder's delivery ZIP has been smoke-tested after extraction.
 

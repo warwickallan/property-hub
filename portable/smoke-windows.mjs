@@ -87,7 +87,37 @@ try {
   server=await start(true);
   core=await req('/api/core');
   ok(core.sites.length===10,'Separate Demo launcher seeds ten fictional sites');
+  // P1.1: record a compliance check against a demo activity through the bundled runtime.
+  const status=await req('/api/status');
+  ok(/^\d+\.\d+\.\d+$/.test(status.version),'Version reported: '+status.version);
+  const acts=await req('/api/activities');
+  const gas=acts.find(a=>a.ref==='PH-C012');
+  const check=await req('/api/checks',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+    activity_id:gas.id,performed_on:status.today,provider_name:'Smoke test engineer (fictional)',outcome:'Satisfactory'})});
+  const after=await req('/api/activities/'+gas.id);
+  ok(check.ref.startsWith('PH-K') && after.last_done_on===status.today && after.next_due_on>status.today,'Compliance check recorded and schedule updated');
+  ok((await req('/api/status')).pending===true,'Recording a check flags changes pending (no automatic recalculation)');
   await stop(server);
+  // Optional upgrade test: start the PREVIOUS release on a throwaway folder, then this release on the same database.
+  const prevIdx=process.argv.indexOf('--upgrade-from');
+  if(prevIdx>0){
+    const prev=path.resolve(process.argv[prevIdx+1]);
+    const upgradeDir=path.join(root,'upgrade-data');
+    const old=spawn(path.join(prev,'runtime','node.exe'),['--import','tsx','./server/index.ts'],{cwd:path.join(prev,'app'),
+      env:{...env,PH_DATA_DIR:upgradeDir,PH_DEMO_DATA:'1'},stdio:['ignore','pipe','pipe']});
+    await wait();
+    const oldActs=await req('/api/activities');
+    const oldC12=oldActs.find(a=>a.ref==='PH-C012');
+    ok(oldC12 && oldC12.next_due_override===undefined,'Previous release created a pre-upgrade database (no override field)');
+    await stop(old);
+    const upgraded=spawn(exe,['--import','tsx','./server/index.ts'],{cwd:app,env:{...env,PH_DATA_DIR:upgradeDir,PH_DEMO_DATA:'0'},stdio:['ignore','pipe','pipe']});
+    await wait();
+    const newC12=(await req('/api/activities')).find(a=>a.ref==='PH-C012');
+    ok(newC12.next_due_on===oldC12.next_due_on && newC12.last_done_on===oldC12.last_done_on && newC12.next_due_override===0,
+      'Upgrade keeps existing dates and classifies the schedule as calculated');
+    ok((await req('/api/core')).sites.length===10,'Upgrade keeps all existing records');
+    await stop(upgraded);
+  }
   const prodDb=path.join(root,'data','propertyhub.db');
   ok(fs.existsSync(prodDb) && fs.existsSync(path.join(root,'demo-data','propertyhub.db')),'Real and Demo databases are independent');
   console.log('SMOKE SUCCESS: '+passed+' checks, folder='+folder);

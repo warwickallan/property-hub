@@ -11,6 +11,7 @@ import puppeteer from 'puppeteer-core';
 import { driver, enableDownloads, findChrome, Results, wait } from './lib.mjs';
 import p0 from './p0-journey.mjs';
 import p1 from './p1-journey.mjs';
+import p11 from './p11-journey.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(ROOT, 'e2e', 'output');
@@ -46,6 +47,7 @@ async function waitForServer() {
 const journeys = [
   ['p0', p0],
   ['p1', p1],
+  ['p11', p11],
 ].filter(([n]) => !only.length || only.includes(n));
 
 let failed = 0;

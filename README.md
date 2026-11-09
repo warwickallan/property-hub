@@ -1,11 +1,12 @@
 # Property Hub
 
-A local-first, **single-operator property compliance tracker** (v0.3 model, P0 + P1). It covers:
+A local-first, **single-operator property compliance tracker** (v0.4.0: v0.3 model, P0 + P1 + P1.1). It covers:
 
 - the Area › Site › Room › Equipment hierarchy;
 - scheduled Compliance Activities;
 - one central document library with reusable links;
 - **manual** compliance recalculation;
+- compliance inspections/checks per activity, with a calculated next due and traceable amendments;
 - routine 30-point inspections with remedial actions;
 - CSV exports and a printable site front sheet;
 - reminder drafts you review before anything goes out.
@@ -24,16 +25,17 @@ Then open **http://localhost:3001**. On first start the app creates `data/proper
 
 - 2 Areas, 10 Sites, rooms and equipment;
 - 5 compliance types and 51 activities;
-- 1 completed and 1 draft inspection.
+- one historical compliance check behind each seeded certificate;
+- 1 completed and 1 draft routine inspection.
 
-An existing P0 database upgrades automatically: migration 2 is additive. The server listens on 127.0.0.1 only. It has no authentication, so don't expose it on a network.
+Existing P0/P1 databases upgrade automatically: migrations 2 and 3 are additive, and existing dates are never changed. The server listens on 127.0.0.1 only. It has no authentication, so don't expose it on a network.
 
 | Command | Purpose |
 |---|---|
 | `npm start` | Build the UI and serve app + API on :3001 |
 | `npm run dev` | Hot-reload dev mode (UI on :5173, API on :3001) |
-| `npm test` | API, rule and CSV tests (Vitest, in-memory DB): 37 tests |
-| `npm run e2e` | Build, start the app on a throwaway data folder, and drive the P0 + P1 browser journeys in headless Chrome |
+| `npm test` | API, rule, schedule and CSV tests (Vitest, in-memory DB): 54 tests |
+| `npm run e2e` | Build, start the app on a throwaway data folder, and drive the P0, P1 and P1.1 browser journeys in headless Chrome |
 | `npm run check` | Typecheck + tests + build + browser journeys (full gate) |
 | `npm run typecheck` | TypeScript check |
 | `npm run seed` | **Reset** the database to fresh demo data |
@@ -44,7 +46,7 @@ An existing P0 database upgrades automatically: migration 2 is additive. The ser
 
 For a self-contained Windows x64 edition with bundled Node runtime, a **clean operational launcher**, a separate fictional Demo launcher and local Backup/Restore shortcuts, see [Portable Windows handover](docs/PORTABLE_WINDOWS.md).
 
-Build from a Windows x64 developer machine with `powershell -NoProfile -File portable/build-windows.ps1`. On the **target laptop**, simply extract the ZIP and double-click `START Property Hub.cmd`: no Node/npm installation, no elevated rights and no network service. Corporate execution policies may still require IT approval.
+Build from a Windows x64 developer machine with `powershell -NoProfile -File portable/build-windows.ps1 -OutputFolder <folder>`. Smoke-test an extracted ZIP with `runtime\node.exe portable\smoke-windows.mjs <extracted folder> [--upgrade-from <previous extracted release>]`. On the **target laptop**, simply extract the ZIP and double-click `START Property Hub.cmd`: no Node/npm installation, no elevated rights and no network service. Corporate execution policies may still require IT approval.
 
 Portable operational records live in `%LOCALAPPDATA%\PropertyHub\data` **outside** the extracted app folder; demo records use `%LOCALAPPDATA%\PropertyHub\demo-data`. Keep live data and backups out of Git. Do not import real sensitive accommodation data before work-device approval.
 
@@ -90,6 +92,31 @@ Portable operational records live in `%LOCALAPPDATA%\PropertyHub\data` **outside
   - reference IDs no longer wrap; tables have zebra rows;
   - on phones the nav is a single scrollable row, forms and grids stack, and tap targets are larger;
   - inputs use 16px text so iOS doesn't zoom on focus.
+
+### P1.1: schedule fix and compliance inspections / checks
+- **Fixed defect (PH-C012 Gas Safety)**. There were two root causes:
+  - Editing *Last done* never re-derived *Next due*, because the stored date always won.
+  - The previous cycle's certificate expiry still capped the due date after the dates were edited.
+- **Schedule now works like this:**
+  - next due = last inspection date + interval (calendar months, clamped at month end), calculated and saved;
+  - an optional **Override** needs a date and a reason, and is shown as *Override* everywhere;
+  - Recalculate uses the saved effective date;
+  - only certificates issued in the current cycle count as evidence or cap the due date;
+  - a type's default interval change re-derives the activities that follow it.
+- **Compliance Inspection / Check**:
+  - Start it from **Record Inspection / Check** on any activity, or from **Inspections → Start inspection → Compliance Inspection / Check**, where an Area › Site › Room / Type picker finds the activity. Type and location are inherited from the activity.
+  - Record the performed date, inspector and/or engineer, outcome (Satisfactory / with advisories / Unsatisfactory / Not completed) and notes.
+  - Attach a certificate by uploading it or picking it from the library. Verification is a separate tick, so an unverified certificate never turns the activity green.
+  - The form proposes next due = performed date + interval, with an optional override (date and reason).
+  - Saving keeps an immutable event and updates the activity's last inspection date and next due. It flags Changes pending and does **not** recalculate.
+  - *Not completed* keeps the record without moving the schedule. *Unsatisfactory* makes the activity red at the next Recalculate.
+  - A record dated before the current last inspection is kept as history only.
+- **Amendments**: *Amend…* creates a new record that supersedes the original and requires a reason. The original stays visible, marked *Superseded*. Checks have no edit or delete.
+- **Activity history**:
+  - *Inspection / Check history* is the default view, latest first.
+  - *Schedule changes* logs manual edits, recorded checks and amendments, with before → after.
+  - *Calculation history* collapses identical consecutive Recalculate snapshots and shows full timestamps to the second.
+- The routine 30-point inspection is unchanged and still offered from the same Start button.
 
 ### Not built yet
 - **Service charges (P2)**: placeholder page only.

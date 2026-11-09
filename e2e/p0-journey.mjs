@@ -51,7 +51,11 @@ export default async function p0(d, r, { tmpDir }) {
   await wait(500);
   await d.clickText('label.pick-row', /Kettle 001/);
   await d.setVal('input[placeholder="e.g. PAT 2027"]', 'PAT 2027');
+  // No last inspection yet, so the first due date is entered as an explicit (reasoned) override.
+  await page.$eval('[aria-label="Override next due"]', (c) => c.click());
+  await wait(250);
   await d.setVal('[aria-label="Next due"]', '2027-06-01');
+  await d.setVal('[aria-label="Override reason"]', 'First PAT test booked (demo)');
   await d.selectByText('[aria-label="Responsible person"]', /Team Leader North/);
   await (await page.$('input[type=file]')).uploadFile(pdf);
   await d.shot('02-new-activity-form');

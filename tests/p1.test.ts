@@ -29,9 +29,9 @@ const ok = (r: request.Response, code = 200) => {
 const parseCsv = (text: string) => text.replace(/^﻿/, '').trim().split('\r\n');
 
 describe('seed', () => {
-  it('migrates to v2 and seeds a completed and a draft inspection with refs', async () => {
+  it('migrates to the latest version and seeds a completed and a draft inspection with refs', async () => {
     const versions = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all().map((r: any) => r.version);
-    expect(versions).toEqual([1, 2]);
+    expect(versions).toEqual([1, 2, 3]);
     const runs = ok(await api.get('/api/inspections'));
     expect(runs.map((r: any) => [r.ref, r.state]).sort()).toEqual([['PH-I001', 'complete'], ['PH-I002', 'draft']]);
     const actions = ok(await api.get('/api/actions'));

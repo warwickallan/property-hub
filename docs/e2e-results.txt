@@ -54,6 +54,36 @@ PASS [p1] Print buttons hidden in print media
 PASS [p1] Inspection form has no horizontal page scroll at 390px
 PASS [p1] New action form fits at 390px
 PASS [p1] Dashboard has no horizontal page scroll at 390px (tables scroll inside their card)
+PASS [p11] PH-C012 Gas Safety starts Overdue, next due 04/11/2026
+PASS [p11] Edit form shows calculated next due 09/11/2027 = last done + 12 months
+PASS [p11] Next due is calculated, not a free field, unless Override is ticked
+PASS [p11] Save confirms and header flags Changes pending
+PASS [p11] Overview shows the new calculated next due
+PASS [p11] Overview explains the snapshot is stale until Recalculate
+PASS [p11] Dashboard status unchanged before Recalculate
+PASS [p11] Reload shows the persisted next due
+PASS [p11] After Recalculate the Dashboard shows 09/11/2027 and no longer Overdue
+PASS [p11] Without a current-cycle certificate it shows Unknown / missing (not green)
+PASS [p11] Check form inherits activity type and location
+PASS [p11] Proposed next due = performed date + interval
+PASS [p11] Saved check opens the Inspection / Check history
+PASS [p11] New check appears first with its verified certificate
+PASS [p11] Recording the check flags Changes pending
+PASS [p11] Status unchanged until Recalculate
+PASS [p11] After Recalculate PH-C012 is green (verified current certificate)
+PASS [p11] Calculation history uses full timestamps with seconds and a run count
+PASS [p11] Calculation history collapses 7 runs into 3 distinct results
+PASS [p11] Amend opens a correction form explaining the original is kept
+PASS [p11] Amendment requires a reason
+PASS [p11] History shows the superseded original and the amendment with its reason
+PASS [p11] Schedule changes log the manual edit, the check and the amendment
+PASS [p11] Start offers Routine or Compliance inspection
+PASS [p11] Cascading Area > Site > Type picker narrows to the one gas activity
+PASS [p11] Check saved with an unverified certificate
+PASS [p11] Unverified certificate does not make the activity green
+PASS [p11] Compliance checks register lists the new checks
+PASS [p11] Routine 30-point inspection still starts from the chooser
 
 p0: 20 passed, 0 failed
 p1: 36 passed, 0 failed
+p11: 29 passed, 0 failed
