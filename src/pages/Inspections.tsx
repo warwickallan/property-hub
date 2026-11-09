@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, downloadCsv, type Core, type Row } from '../api';
-import { Card, DataTable, DocumentsPanel, ErrorBox, Field, Loading, LocationSelects, Modal, Page, useStoredState, type Col, type LocFilter } from '../components';
+import { Card, DataTable, DocumentsPanel, ErrorBox, Field, Loading, LocationSelects, Modal, Page, Tabs, useStoredState, type Col, type LocFilter } from '../components';
 import { fmtDate, fmtDateTime, londonToday, navigate, useLoad } from '../util';
 import { ACTION_COLS, ActionModal, type ActionContext } from './Actions';
+import { ChecksRegister, StartChooser } from './Checks';
 
 const RESPONSES = ['Pass', 'Issue', 'Not applicable', 'Not checked'];
 const RESP_CLASS: Record<string, string> = { Pass: 'pass', Issue: 'issue', 'Not applicable': 'na', 'Not checked': 'nc' };
@@ -90,6 +91,8 @@ export function Inspections() {
   const { data, error } = useLoad<Row[]>('/api/inspections');
   const [f, setF] = useStoredState<Filters>('ph:insp', EMPTY);
   const [starting, setStarting] = useState(false);
+  const [choosing, setChoosing] = useState(false);
+  const [mode, setMode] = useStoredState('ph:inspmode', { tab: 'routine' });
   const [err, setErr] = useState<string | null>(null);
   if (error) return <ErrorBox error={error} />;
   if (!data || !core) return <Loading />;
@@ -108,12 +111,21 @@ export function Inspections() {
             setErr(null);
             try { await downloadCsv('/api/export/inspections', { ids: completed.map((r) => r.id) }, 'inspection-results.csv'); } catch (e: any) { setErr(e.message); }
           }}>Export completed results CSV ({completed.length})</button>
-          <button className="btn-primary" onClick={() => setStarting(true)}>+ Start inspection</button>
+          <button className="btn-primary" onClick={() => setChoosing(true)}>+ Start inspection</button>
         </>
       }
     >
-      <p className="muted small">Routine 30-point visual inspections. They record observations and raise remedial actions; they do not count as statutory evidence.</p>
       <ErrorBox error={err} />
+      <Tabs
+        active={mode.tab}
+        onChange={(tab) => setMode({ tab })}
+        tabs={[
+          { key: 'routine', label: 'Routine Property Inspections', count: data.length },
+          { key: 'checks', label: 'Compliance Inspections / Checks' },
+        ]}
+      />
+      {mode.tab === 'checks' ? <ChecksRegister /> : <>
+      <p className="muted small">Routine 30-point visual inspections. They record observations and raise remedial actions; they do not count as statutory evidence.</p>
       <div className="filters">
         <LocationSelects core={core} value={f} onChange={(v) => setF({ ...f, ...v })} />
         <select aria-label="Inspection status" value={f.state} onChange={(e) => setF({ ...f, state: e.target.value })}>
@@ -129,6 +141,8 @@ export function Inspections() {
       <Card>
         <DataTable cols={INSPECTION_COLS} rows={rows} onRowClick={(r) => navigate(`#/inspections/${r.id}`)} empty="No inspections match" />
       </Card>
+      </>}
+      {choosing && <StartChooser onClose={() => setChoosing(false)} onRoutine={() => { setChoosing(false); setStarting(true); }} />}
       {starting && <StartInspectionModal onClose={() => setStarting(false)} />}
     </Page>
   );

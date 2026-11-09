@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, type Core, type Row } from '../api';
 import { Card, DataTable, DocumentsPanel, ErrorBox, Field, Loading, Modal, Page, StatusChip, Tabs } from '../components';
-import { fmtDate, fmtDateTime, LEVEL_LABEL, navigate, useLoad } from '../util';
+import { addMonths, fmtDate, hashParams, LEVEL_LABEL, navigate, useLoad } from '../util';
 import { ACTION_COLS, ActionModal } from './Actions';
+import { ActivityHistory } from './Checks';
 
 function Crumbs({ a }: { a: Row }) {
   return (
@@ -17,8 +18,10 @@ function Crumbs({ a }: { a: Row }) {
 
 export function ActivityDetail({ id }: { id: number }) {
   const { data: a, error, reload } = useLoad<Row>(`/api/activities/${id}`);
-  const [tab, setTab] = useState('overview');
+  const params = hashParams();
+  const [tab, setTab] = useState(params.get('tab') ?? 'overview');
   const [err, setErr] = useState<string | null>(null);
+  const flash = params.get('msg');
   if (error) return <ErrorBox error={error} />;
   if (!a) return <Loading />;
   const archive = async () => {
@@ -36,12 +39,16 @@ export function ActivityDetail({ id }: { id: number }) {
       title={<>{a.ref} · {a.type_name}{a.name ? ` — ${a.name}` : ''} {a.archived_at && <span className="chip chip-none">Archived</span>}</>}
       actions={
         <>
+          {!a.archived_at && <a className="btn btn-primary btn-lg" href={`#/activities/${id}/check`}>Record Inspection / Check</a>}
           <a className="btn" href={`#/activities/${id}/edit`}>Edit</a>
           <button onClick={archive}>{a.archived_at ? 'Restore' : 'Archive'}</button>
         </>
       }
     >
       <ErrorBox error={err} />
+      {flash === 'recorded' && <div className="note ok-note">Inspection / check recorded and the schedule updated. <strong>Changes pending</strong> — click Recalculate Compliance to update the status.</div>}
+      {flash === 'amended' && <div className="note ok-note">Amendment recorded. The original record is kept and marked as superseded. Click Recalculate Compliance to update the status.</div>}
+      {flash === 'saved' && <div className="note ok-note">Saved. <strong>Changes pending</strong> — the status updates when you click Recalculate Compliance.</div>}
       <Tabs
         active={tab}
         onChange={setTab}
@@ -49,31 +56,34 @@ export function ActivityDetail({ id }: { id: number }) {
           { key: 'overview', label: 'Overview & Schedule' },
           { key: 'equipment', label: 'Linked Equipment', count: a.equipment.length },
           { key: 'documents', label: 'Documents', count: a.doc_count },
-          { key: 'history', label: 'Inspections / History' },
+          { key: 'history', label: 'Inspection & Check History', count: a.check_count },
           { key: 'actions', label: 'Actions', count: a.actions.length },
         ]}
       />
       {tab === 'overview' && <Overview a={a} />}
       {tab === 'equipment' && <LinkedEquipment a={a} onChange={reload} />}
       {tab === 'documents' && <DocumentsPanel kind="activity" id={id} title="Evidence documents" />}
-      {tab === 'history' && <History id={id} />}
+      {tab === 'history' && <ActivityHistory a={a} />}
       {tab === 'actions' && <ActivityActions a={a} onChange={reload} />}
     </Page>
   );
 }
 
 function Overview({ a }: { a: Row }) {
-  const interval = a.interval_months ?? a.type_interval;
+  const interval = a.effective_interval;
+  const stale = a.status && (a.snap_due_on ?? null) !== (a.next_due_on ?? null);
   const rows: [string, React.ReactNode][] = [
     ['Compliance type', `${a.type_code} — ${a.type_name}`],
     ['Location level', LEVEL_LABEL[a.location_level]],
     ['Location', [a.area_code, a.site_code, a.room_code].filter(Boolean).join(' › ')],
     ['Responsible', a.owner_name ? `${a.owner_name}${a.owner_email ? ` <${a.owner_email}>` : ' (no email)'}` : '—'],
     ['Applicability', a.applicability === 'not_applicable' ? `Not applicable — ${a.na_reason || 'no reason'}` : a.applicability === 'unknown' ? 'Unknown' : 'Required'],
-    ['Last done', fmtDate(a.last_done_on)],
-    ['Next due (entered)', fmtDate(a.next_due_on)],
-    ['Expires', fmtDate(a.expires_on)],
+    ['Last inspection / check', <>{fmtDate(a.last_done_on)}{a.latest_check && <span className="muted small"> · latest record {a.latest_check.ref} ({a.latest_check.outcome})</span>}</>],
     ['Interval', interval ? `${interval} months${a.interval_months ? '' : ' (type default)'}` : '—'],
+    ['Next due', a.next_due_override
+      ? <><strong>{fmtDate(a.next_due_on)}</strong> <span className="override-tag">Override</span><div className="muted small">{a.next_due_override_reason}{a.derived_next_due ? ` · calculated would be ${fmtDate(a.derived_next_due)}` : ''}</div></>
+      : <><strong>{fmtDate(a.next_due_on)}</strong>{a.next_due_on && <span className="muted small"> · calculated: last done + {interval} months</span>}</>],
+    ['Expires', fmtDate(a.expires_on)],
     ['Evidence required', a.evidence_required ? 'Yes — verified document needed' : 'No'],
     ['Evidence', `${a.doc_count} linked, ${a.verified_doc_count} verified`],
     ['Notes', a.notes || '—'],
@@ -83,7 +93,8 @@ function Overview({ a }: { a: Row }) {
       <Card title="Status snapshot">
         <p><StatusChip status={a.status} /></p>
         <p>{a.status ? a.status_reason : 'Not yet calculated — click Recalculate Compliance.'}</p>
-        {a.status && <p className="muted small">Calculated due date {fmtDate(a.snap_due_on)} · days to due {a.days_to_due ?? '—'}</p>}
+        {a.status && <p className="muted small">Due date used in this snapshot {fmtDate(a.snap_due_on)} · days to due {a.days_to_due ?? '—'}</p>}
+        {stale && <div className="note">The schedule now says next due <strong>{fmtDate(a.next_due_on)}</strong>. Click <strong>Recalculate Compliance</strong> to update this status.</div>}
         <p className="muted small">Status only changes when you click Recalculate. Edits since the last run are shown as "Changes pending" in the header.</p>
       </Card>
       <Card title="Overview & schedule">
@@ -183,42 +194,6 @@ export function EquipmentPicker({ level, locationId, exclude, onClose, onPick }:
   );
 }
 
-function History({ id }: { id: number }) {
-  const { data } = useLoad<Row>(`/api/activities/${id}/history`);
-  if (!data) return <Loading />;
-  return (
-    <>
-      <Card title="Status snapshots (one per manual recalculation)">
-        <DataTable
-          rows={data.snapshots.map((s: Row) => ({ ...s, id: s.run_id }))}
-          empty="Never calculated"
-          cols={[
-            { key: 'run_at', label: 'Calculated', render: (s) => fmtDateTime(s.run_at) },
-            { key: 'as_of_date', label: 'As of', render: (s) => fmtDate(s.as_of_date) },
-            { key: 'status', label: 'Status', render: (s) => <StatusChip status={s.status} /> },
-            { key: 'due_on', label: 'Due', render: (s) => fmtDate(s.due_on) },
-            { key: 'reason', label: 'Reason' },
-          ]}
-        />
-      </Card>
-      <Card title="Reminder log">
-        <DataTable
-          rows={data.emails}
-          empty="No reminders sent or exported"
-          cols={[
-            { key: 'sent_at', label: 'When', render: (l) => fmtDateTime(l.sent_at) },
-            { key: 'mode', label: 'Mode' },
-            { key: 'outcome', label: 'Outcome' },
-            { key: 'recipient_email', label: 'Recipient' },
-            { key: 'subject', label: 'Subject' },
-          ]}
-        />
-      </Card>
-      <p className="muted small">Routine 30-point inspections are recorded per Site under Inspections (P1) and do not substitute statutory evidence.</p>
-    </>
-  );
-}
-
 function ActivityActions({ a, onChange }: { a: Row; onChange: () => void }) {
   const [adding, setAdding] = useState(false);
   return (
@@ -236,6 +211,38 @@ function ActivityActions({ a, onChange }: { a: Row; onChange: () => void }) {
   );
 }
 
+/** Last done + interval -> calculated next due, with an explicit, reasoned override. */
+function ScheduleFields({ f, setF, typeInterval }: { f: Row; setF: (f: Row) => void; typeInterval: number | null }) {
+  const interval = f.interval_months === '' || f.interval_months === null ? typeInterval : Number(f.interval_months);
+  const calculated = f.last_done_on && interval ? addMonths(f.last_done_on, interval) : null;
+  const u = (k: string) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
+  return (
+    <div className="schedule-box">
+      <div className="grid2">
+        <Field label="Last inspection / check date"><input aria-label="Last done" type="date" value={f.last_done_on} onChange={u('last_done_on')} /></Field>
+        <Field label="Interval (months)" hint={`Blank = type default (${typeInterval ?? 'none'})`}>
+          <input aria-label="Interval months" type="number" min={1} value={f.interval_months} onChange={u('interval_months')} />
+        </Field>
+      </div>
+      <div className={`calc-due ${f.next_due_override ? 'superseded' : ''}`} data-testid="calculated-next-due">
+        Calculated next due: <strong>{calculated ? fmtDate(calculated) : '—'}</strong>
+        <span className="muted small"> {calculated ? `(${fmtDate(f.last_done_on)} + ${interval} months)` : interval ? '(enter the last inspection date)' : '(no interval set)'}</span>
+      </div>
+      <label className="inline">
+        <input type="checkbox" aria-label="Override next due" checked={!!f.next_due_override}
+          onChange={(e) => setF({ ...f, next_due_override: e.target.checked, next_due_on: e.target.checked ? (f.next_due_on || calculated || '') : '' })} />
+        Override the calculated next-due date
+      </label>
+      {f.next_due_override && (
+        <div className="grid2 override-fields">
+          <Field label="Override next due"><input aria-label="Next due" type="date" value={f.next_due_on} onChange={u('next_due_on')} /></Field>
+          <Field label="Reason for override (required)"><input aria-label="Override reason" value={f.next_due_override_reason} onChange={u('next_due_override_reason')} placeholder="e.g. Contractor booked earlier" /></Field>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------- create / edit ----------
 export function ActivityForm({ id }: { id?: number }) {
   const { data: core } = useLoad<Core>('/api/core');
@@ -243,6 +250,7 @@ export function ActivityForm({ id }: { id?: number }) {
   const [f, setF] = useState<Row>({
     type_id: '', location_level: 'site', area: '', site: '', room: '', name: '', ref: '', owner_user_id: '',
     last_done_on: '', next_due_on: '', expires_on: '', interval_months: '', applicability: 'required', na_reason: '', notes: '',
+    next_due_override: false, next_due_override_reason: '',
   });
   const [equip, setEquip] = useState<Set<number>>(new Set());
   const [file, setFile] = useState<File | null>(null);
@@ -253,8 +261,10 @@ export function ActivityForm({ id }: { id?: number }) {
     if (!cur) return;
     setF({
       type_id: String(cur.type_id), location_level: cur.location_level, area: String(cur.area_id ?? ''), site: String(cur.site_id ?? ''), room: String(cur.room_id ?? ''),
-      name: cur.name, ref: cur.ref, owner_user_id: String(cur.owner_user_id ?? ''), last_done_on: cur.last_done_on ?? '', next_due_on: cur.next_due_on ?? '',
+      name: cur.name, ref: cur.ref, owner_user_id: String(cur.owner_user_id ?? ''), last_done_on: cur.last_done_on ?? '',
+      next_due_on: cur.next_due_override ? (cur.next_due_on ?? '') : '',
       expires_on: cur.expires_on ?? '', interval_months: cur.interval_months ?? '', applicability: cur.applicability, na_reason: cur.na_reason, notes: cur.notes,
+      next_due_override: !!cur.next_due_override, next_due_override_reason: cur.next_due_override ? cur.next_due_override_reason : '',
     });
   }, [cur]);
 
@@ -272,11 +282,15 @@ export function ActivityForm({ id }: { id?: number }) {
     setErr(null);
     if (!f.type_id) return setErr('Step 1: choose a Compliance Type.');
     if (!locationId) return setErr(`Step 2: choose the ${level} this activity applies to.`);
+    if (f.next_due_override && !f.next_due_on) return setErr('Enter the override next-due date, or untick Override.');
+    if (f.next_due_override && !f.next_due_override_reason.trim()) return setErr('Give a reason for overriding the calculated next-due date.');
     setSaving(true);
     try {
       const body = {
         type_id: Number(f.type_id), location_level: level, location_id: Number(locationId), name: f.name, owner_user_id: f.owner_user_id || null,
-        last_done_on: f.last_done_on || null, next_due_on: f.next_due_on || null, expires_on: f.expires_on || null,
+        last_done_on: f.last_done_on || null, expires_on: f.expires_on || null,
+        next_due_override: !!f.next_due_override, next_due_on: f.next_due_override ? f.next_due_on : null,
+        next_due_override_reason: f.next_due_override ? f.next_due_override_reason : '',
         interval_months: f.interval_months === '' ? null : Number(f.interval_months), applicability: f.applicability, na_reason: f.na_reason, notes: f.notes,
         ...(id ? {} : { ref: f.ref || undefined, equipment_ids: [...equip] }),
       };
@@ -288,7 +302,7 @@ export function ActivityForm({ id }: { id?: number }) {
         fd.append('entity_id', String(saved.id));
         await api.post('/api/documents', fd);
       }
-      navigate(`#/activities/${saved.id}`);
+      navigate(`#/activities/${saved.id}?msg=saved`);
     } catch (e: any) {
       setErr(e.message);
     } finally {
@@ -354,13 +368,9 @@ export function ActivityForm({ id }: { id?: number }) {
               {core.users.filter((x) => x.active || String(x.id) === f.owner_user_id).map((x) => <option key={x.id} value={x.id}>{x.name} ({x.role_label})</option>)}
             </select>
           </Field>
-          <div className="grid3">
-            <Field label="Last done"><input type="date" value={f.last_done_on} onChange={u('last_done_on')} /></Field>
-            <Field label="Next due"><input aria-label="Next due" type="date" value={f.next_due_on} onChange={u('next_due_on')} /></Field>
-            <Field label="Expires"><input type="date" value={f.expires_on} onChange={u('expires_on')} /></Field>
-          </div>
-          <Field label="Interval (months)" hint={`Blank = type default (${type?.suggested_interval_months ?? '—'}). Used when Next due is blank.`}>
-            <input type="number" min={1} value={f.interval_months} onChange={u('interval_months')} />
+          <ScheduleFields f={f} setF={setF} typeInterval={type?.suggested_interval_months ?? null} />
+          <Field label="Certificate / contract expiry (optional)" hint="Only if something expires independently of the schedule; the earlier date wins.">
+            <input aria-label="Expires" type="date" value={f.expires_on} onChange={u('expires_on')} />
           </Field>
           <Field label="Applicability">
             <select value={f.applicability} onChange={u('applicability')}>

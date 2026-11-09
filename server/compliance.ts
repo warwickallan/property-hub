@@ -24,6 +24,8 @@ export interface ActivityInput {
   evidence: EvidenceInput | null;
   openCriticalActions: number;
   warningDays: number;
+  /** Latest effective compliance check for the current cycle, if one was recorded. */
+  latestCheck?: { ref: string; performedOn: string; outcome: string } | null;
 }
 
 export interface ActivityResult {
@@ -45,6 +47,7 @@ export const STATUS_LABEL: Record<Status, string> = {
  * Precedence (most serious first) — v0.3 workflow D:
  *  1. Applicability unknown -> grey; N/A -> na (excluded from compliance rate).
  *  2. Open Critical action linked to the activity -> red.
+ *  2b. Latest recorded compliance check for the current cycle was Unsatisfactory -> red.
  *  3. No usable due date -> grey.
  *  4. Effective due date (earliest of next due [or last done + interval] / expiry /
  *     verified evidence valid-until) before today -> red.
@@ -81,6 +84,10 @@ export function evaluateActivity(input: ActivityInput, today: string): ActivityR
     const n = input.openCriticalActions;
     return { status: 'red', daysToDue: days, dueOn: due, reason: `Critical open action${n > 1 ? `s (${n})` : ''} recorded` };
   }
+  if (input.latestCheck?.outcome === 'Unsatisfactory') {
+    const d = input.latestCheck.performedOn.split('-').reverse().join('/');
+    return { status: 'red', daysToDue: days, dueOn: due, reason: `Latest check ${input.latestCheck.ref} (${d}) was unsatisfactory` };
+  }
   if (due === null || days === null) {
     return { status: 'grey', daysToDue: null, dueOn: null, reason: 'No next due date or last-done date + interval recorded' };
   }
@@ -91,7 +98,7 @@ export function evaluateActivity(input: ActivityInput, today: string): ActivityR
 
   const dueText = days === 0 ? 'due today' : `due in ${days} day${days === 1 ? '' : 's'}`;
   if (input.evidenceRequired && !input.evidence?.verified) {
-    const what = input.evidence ? 'Evidence not reviewed/verified' : 'Required evidence missing';
+    const what = input.evidence ? 'Evidence not reviewed/verified' : 'Required evidence missing for the current cycle';
     return { status: 'grey', daysToDue: days, dueOn: due, reason: `${what} (${dueText})` };
   }
   if (days <= input.warningDays) {

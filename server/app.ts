@@ -13,6 +13,9 @@ import { bad, bool01, errorMiddleware, h, HttpError, idParam, notFound, optInt, 
 import { listInspections, registerInspections, type Ctx } from './inspections.js';
 import { listActions, registerActions } from './actions.js';
 import { sendCsv, toCsv } from './csv.js';
+import { derivedNextDue, effectiveInterval, effectiveNextDue, logScheduleChange, rederiveForType } from './schedule.js';
+import { listChecks, registerChecks } from './checks.js';
+import { APP_VERSION } from './config.js';
 
 export interface AppOptions {
   db: DB;
@@ -91,6 +94,7 @@ export function createApp(opts: AppOptions) {
       lastRun: r ? { id: r.id, createdAt: r.created_at, asOfDate: r.as_of_date, totals: JSON.parse(r.totals_json) } : null,
       operatorName: getSetting(db, 'operator_name'),
       emailMode: 'demo',
+      version: APP_VERSION,
     });
   }));
 
@@ -276,9 +280,14 @@ export function createApp(opts: AppOptions) {
   }));
   app.put('/api/types/:id', h((req, res) => {
     const id = idParam(req);
-    const f = typeFields(req.body ?? {}, must('SELECT * FROM compliance_types WHERE id = ?', id, 'Compliance type'));
-    run(`UPDATE compliance_types SET code = ?, name = ?, suggested_interval_months = ?, warning_days = ?, evidence_required = ?, active = ?, notes = ?, updated_at = ?
-      WHERE id = ?`, f.code, f.name, f.interval, f.warn, f.evidence, f.active, f.notes, ts(), id);
+    const cur = must('SELECT * FROM compliance_types WHERE id = ?', id, 'Compliance type');
+    const f = typeFields(req.body ?? {}, cur);
+    db.transaction(() => {
+      run(`UPDATE compliance_types SET code = ?, name = ?, suggested_interval_months = ?, warning_days = ?, evidence_required = ?, active = ?, notes = ?, updated_at = ?
+        WHERE id = ?`, f.code, f.name, f.interval, f.warn, f.evidence, f.active, f.notes, ts(), id);
+      // Activities following the type default interval get their persisted next-due re-derived.
+      if (f.interval !== cur.suggested_interval_months) rederiveForType(db, id, ts());
+    })();
     res.json(get('SELECT * FROM compliance_types WHERE id = ?', id));
   }));
 
@@ -363,6 +372,10 @@ export function createApp(opts: AppOptions) {
               a.owner_user_id, u.name AS owner_name, u.email AS owner_email,
               a.last_done_on, a.next_due_on, a.expires_on, a.interval_months, t.suggested_interval_months AS type_interval,
               a.applicability, a.na_reason, a.notes, a.archived_at, a.updated_at,
+              a.next_due_override, a.next_due_override_reason, a.schedule_check_id,
+              (SELECT c.ref || '|' || c.performed_on || '|' || c.outcome FROM compliance_checks c
+                 WHERE c.activity_id = a.id AND c.superseded_by_id IS NULL ORDER BY c.performed_on DESC, c.id DESC LIMIT 1) AS latest_check,
+              (SELECT COUNT(*) FROM compliance_checks c WHERE c.activity_id = a.id AND c.superseded_by_id IS NULL) AS check_count,
               (SELECT COUNT(*) FROM activity_equipment ae WHERE ae.activity_id = a.id) AS equipment_count,
               (SELECT GROUP_CONCAT(ae.equipment_id) FROM activity_equipment ae WHERE ae.activity_id = a.id) AS equipment_ids,
               (SELECT COUNT(*) FROM document_links l WHERE l.entity_kind = 'activity' AND l.entity_id = a.id) AS doc_count,
@@ -378,7 +391,17 @@ export function createApp(opts: AppOptions) {
        WHERE (${where}) ${includeArchived ? '' : 'AND a.archived_at IS NULL'}
        ORDER BY a.ref`,
       ...params,
-    ).map((a): Row => ({ ...a, equipment_ids: a.equipment_ids ? String(a.equipment_ids).split(',').map(Number) : [] }));
+    ).map((a): Row => {
+      const [ref, performed, outcome] = a.latest_check ? String(a.latest_check).split('|') : [];
+      const interval = effectiveInterval(a.interval_months, a.type_interval);
+      return {
+        ...a,
+        equipment_ids: a.equipment_ids ? String(a.equipment_ids).split(',').map(Number) : [],
+        latest_check: ref ? { ref, performed_on: performed, outcome } : null,
+        effective_interval: interval,
+        derived_next_due: derivedNextDue(a.last_done_on, interval),
+      };
+    });
   }
 
   const activityFields = (b: Row, cur?: Row) => {
@@ -397,13 +420,27 @@ export function createApp(opts: AppOptions) {
     if (!['required', 'not_applicable', 'unknown'].includes(applicability)) throw bad('Invalid applicability');
     const interval = pick('interval_months', (v) => optInt(v, 'Interval'), null as number | null);
     if (interval !== null && interval <= 0) throw bad('Interval must be at least 1 month');
+    const lastDone = pick('last_done_on', (v) => optDate(v, 'Last done'), null as string | null);
+    if (lastDone && lastDone > londonToday(now())) throw bad('Last done cannot be in the future');
+    // Next due is derived (last done + interval) unless an explicit override is requested.
+    // Older API callers that send next_due_on without the flag are treated as overrides.
+    const explicitDate = b.next_due_on !== undefined ? optDate(b.next_due_on, 'Next due') : undefined;
+    const override = b.next_due_override !== undefined ? !!bool01(b.next_due_override, 0)
+      : explicitDate !== undefined ? explicitDate !== null : !!cur?.next_due_override;
+    const overrideDate = explicitDate !== undefined ? explicitDate : (cur?.next_due_on ?? null);
+    if (override && !overrideDate) throw bad('Enter the override next-due date, or untick Override to calculate it from last done + interval');
+    const typeInterval = (get('SELECT suggested_interval_months AS m FROM compliance_types WHERE id = ?', typeId) as Row).m as number | null;
+    const sched = effectiveNextDue({ last_done_on: lastDone, interval_months: interval, type_interval: typeInterval, next_due_override: override, override_date: overrideDate });
+    const reasonIn = b.next_due_override_reason !== undefined ? optStr(b.next_due_override_reason) : (cur?.next_due_override_reason ?? '');
     return {
       type_id: typeId, location_level: level,
       area_id: level === 'area' ? locId : null, site_id: level === 'site' ? locId : null, room_id: level === 'room' ? locId : null,
       owner_user_id: ownerId,
       name: pick('name', optStr, ''),
-      last_done_on: pick('last_done_on', (v) => optDate(v, 'Last done'), null),
-      next_due_on: pick('next_due_on', (v) => optDate(v, 'Next due'), null),
+      last_done_on: lastDone,
+      next_due_on: sched.next_due_on,
+      next_due_override: override ? 1 : 0,
+      next_due_override_reason: override ? (reasonIn || 'Next due set explicitly') : '',
       expires_on: pick('expires_on', (v) => optDate(v, 'Expiry'), null),
       interval_months: interval, applicability,
       na_reason: pick('na_reason', optStr, ''),
@@ -446,9 +483,9 @@ export function createApp(opts: AppOptions) {
     const id = db.transaction(() => {
       const newId = Number(run(
         `INSERT INTO compliance_activities (ref, type_id, name, location_level, area_id, site_id, room_id, owner_user_id, last_done_on, next_due_on,
-           expires_on, interval_months, applicability, na_reason, notes, created_at, updated_at)
+           next_due_override, next_due_override_reason, expires_on, interval_months, applicability, na_reason, notes, created_at, updated_at)
          VALUES (@ref, @type_id, @name, @location_level, @area_id, @site_id, @room_id, @owner_user_id, @last_done_on, @next_due_on,
-           @expires_on, @interval_months, @applicability, @na_reason, @notes, @ts, @ts)`,
+           @next_due_override, @next_due_override_reason, @expires_on, @interval_months, @applicability, @na_reason, @notes, @ts, @ts)`,
         { ...f, ref: optStr(b.ref) || nextCode('compliance_activities', 'ref', 'PH-C'), ts: ts() },
       ).lastInsertRowid);
       if (Array.isArray(b.equipment_ids) && b.equipment_ids.length) linkEquipment(newId, b.equipment_ids);
@@ -460,10 +497,17 @@ export function createApp(opts: AppOptions) {
     const id = idParam(req);
     const cur = must('SELECT * FROM compliance_activities WHERE id = ?', id, 'Activity');
     const f = activityFields(req.body ?? {}, cur);
-    run(`UPDATE compliance_activities SET type_id = @type_id, name = @name, location_level = @location_level, area_id = @area_id, site_id = @site_id,
-           room_id = @room_id, owner_user_id = @owner_user_id, last_done_on = @last_done_on, next_due_on = @next_due_on, expires_on = @expires_on,
-           interval_months = @interval_months, applicability = @applicability, na_reason = @na_reason, notes = @notes, updated_at = @ts
-         WHERE id = @id`, { ...f, id, ts: ts() });
+    db.transaction(() => {
+      // A manual change of the last-done date means the schedule no longer comes from a recorded check.
+      const scheduleCheck = f.last_done_on === cur.last_done_on ? cur.schedule_check_id : null;
+      run(`UPDATE compliance_activities SET type_id = @type_id, name = @name, location_level = @location_level, area_id = @area_id, site_id = @site_id,
+             room_id = @room_id, owner_user_id = @owner_user_id, last_done_on = @last_done_on, next_due_on = @next_due_on,
+             next_due_override = @next_due_override, next_due_override_reason = @next_due_override_reason, expires_on = @expires_on,
+             interval_months = @interval_months, applicability = @applicability, na_reason = @na_reason, notes = @notes,
+             schedule_check_id = @schedule_check_id, updated_at = @ts
+           WHERE id = @id`, { ...f, id, ts: ts(), schedule_check_id: scheduleCheck });
+      logScheduleChange(db, id, cur as any, f as any, 'edit', ts(), null, optStr(req.body?.change_note));
+    })();
     res.json(activityDetail(id));
   }));
   app.post('/api/activities/:id/archive', h((req, res) => {
@@ -487,8 +531,11 @@ export function createApp(opts: AppOptions) {
   app.get('/api/activities/:id/history', h((req, res) => {
     const id = idParam(req);
     res.json({
+      checks: listChecks(db, 'c.activity_id = ?', [id]),
+      schedule: all(`SELECT l.*, c.ref AS check_ref FROM activity_schedule_log l LEFT JOIN compliance_checks c ON c.id = l.check_id
+        WHERE l.activity_id = ? ORDER BY l.changed_at DESC, l.id DESC`, id),
       snapshots: all(`SELECT s.*, r.created_at AS run_at, r.as_of_date FROM activity_status_snapshots s JOIN recalculation_runs r ON r.id = s.run_id
-        WHERE s.activity_id = ? ORDER BY s.run_id DESC LIMIT 50`, id),
+        WHERE s.activity_id = ? ORDER BY s.run_id DESC LIMIT 500`, id),
       emails: all(`SELECT l.* FROM email_log l JOIN reminder_candidates c ON c.id = l.candidate_id WHERE c.activity_id = ? ORDER BY l.id DESC`, id),
     });
   }));
@@ -673,6 +720,7 @@ export function createApp(opts: AppOptions) {
   const ctx: Ctx = { db, ts, today: () => londonToday(now()), nextCode };
   registerInspections(app, ctx);
   registerActions(app, ctx);
+  registerChecks(app, ctx);
 
   /** CSV of the caller's currently filtered Activities register, in the order given. */
   app.post('/api/export/activities', h((req, res) => {

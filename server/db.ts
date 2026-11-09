@@ -27,6 +27,7 @@ export function migrate(db: DB): void {
     if (applied.has(m.version)) continue;
     db.transaction(() => {
       db.exec(m.sql);
+      m.up?.(db);
       db.prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)').run(m.version, m.name, new Date().toISOString());
     })();
   }

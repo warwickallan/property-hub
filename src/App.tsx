@@ -10,6 +10,7 @@ import { Reminders } from './pages/Reminders';
 import { ActionsRegister, ActionDetail } from './pages/Actions';
 import { Inspections, InspectionDetail } from './pages/Inspections';
 import { SiteFrontSheetPrint } from './pages/Print';
+import { CheckForm } from './pages/Checks';
 import { AdminPeople, AdminCoreData, AdminTypes, AdminSettings, ServiceCharges } from './pages/Admin';
 
 function useHash() {
@@ -47,6 +48,7 @@ function route(hash: string) {
     case 'activities':
       if (b === 'new') return <ActivityForm />;
       if (id && c === 'edit') return <ActivityForm id={id} />;
+      if (id && c === 'check') return <CheckForm activityId={id} key={hash} />;
       if (id) return <ActivityDetail id={id} />;
       return <ActivitiesRegister />;
     case 'equipment': return id ? <EquipmentDetail id={id} /> : <EquipmentRegister />;
@@ -54,6 +56,7 @@ function route(hash: string) {
     case 'areas': case 'sites': case 'rooms':
       if (a === 'sites' && id && c === 'print') return <SiteFrontSheetPrint id={id} />;
       return id ? <LocationDetail kind={a.slice(0, -1) as 'area' | 'site' | 'room'} id={id} key={hash} /> : <AdminCoreData />;
+    case 'checks': return id && c === 'amend' ? <CheckForm amendId={id} key={hash} /> : <Inspections />;
     case 'inspections': return id ? <InspectionDetail id={id} key={id} /> : <Inspections />;
     case 'actions': return id ? <ActionDetail id={id} key={id} /> : <ActionsRegister />;
     case 'reminders': return <Reminders />;
@@ -93,7 +96,7 @@ function Header() {
 
   return (
     <header className="header">
-      <div className="brand"><a href="#/">PROPERTY HUB</a><span className="badge">Local demo · fictional data</span></div>
+      <div className="brand"><a href="#/">PROPERTY HUB</a><span className="badge">Local · single operator</span>{status?.version && <span className="app-version">v{status.version}</span>}</div>
       <div className="header-right">
         <div className="calc-info">
           {status?.lastRun ? <>Last calculated <strong>{fmtDateTime(status.lastRun.createdAt)}</strong></> : <strong>Not yet calculated</strong>}

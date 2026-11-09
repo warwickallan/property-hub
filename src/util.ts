@@ -59,3 +59,17 @@ export function locationLabel(a: Record<string, any>): string {
 export function londonToday(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
 }
+
+// Same calendar arithmetic as the server (single source of truth, month-end clamped).
+export { addMonths } from '../server/dates';
+
+/** Full timestamp in Europe/London including seconds, so separate runs are distinguishable. */
+export function fmtStamp(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-GB', { timeZone: 'Europe/London', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+/** Query parameters after '?' in the hash route. */
+export function hashParams(): URLSearchParams {
+  return new URLSearchParams(window.location.hash.split('?')[1] ?? '');
+}

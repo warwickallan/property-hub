@@ -1,10 +1,15 @@
 // Ordered SQLite migrations (v0.3 Area > Site > Room > Equipment model).
 // Applied once each, tracked in schema_migrations. The obsolete flat
 // properties / property_checks schema from the interrupted v0.2 run is NOT kept.
+import type Database from 'better-sqlite3';
+import { derivedNextDue } from './schedule.js';
+
 export interface Migration {
   version: number;
   name: string;
   sql: string;
+  /** Optional data step run after `sql`, inside the same transaction. */
+  up?: (db: Database.Database) => void;
 }
 
 const LEVEL_CHECK = `CHECK (
@@ -283,5 +288,70 @@ CREATE UNIQUE INDEX ux_action_ref ON actions(ref);
 CREATE INDEX idx_actions_site ON actions(site_id);
 CREATE INDEX idx_actions_run ON actions(inspection_run_id);
 `,
+  },
+  {
+    version: 3,
+    name: 'P1.1 derived next-due with explicit override, compliance check events, schedule change log',
+    sql: `
+ALTER TABLE compliance_activities ADD COLUMN next_due_override INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE compliance_activities ADD COLUMN next_due_override_reason TEXT NOT NULL DEFAULT '';
+ALTER TABLE compliance_activities ADD COLUMN schedule_check_id INTEGER;
+
+CREATE TABLE compliance_checks (
+  id INTEGER PRIMARY KEY,
+  ref TEXT NOT NULL UNIQUE,
+  activity_id INTEGER NOT NULL REFERENCES compliance_activities(id) ON DELETE RESTRICT,
+  performed_on TEXT NOT NULL,
+  inspector_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  provider_name TEXT NOT NULL DEFAULT '',
+  outcome TEXT NOT NULL CHECK (outcome IN ('Satisfactory','Satisfactory with advisories','Unsatisfactory','Not completed')),
+  notes TEXT NOT NULL DEFAULT '',
+  certificate_document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  interval_months_used INTEGER,
+  proposed_next_due TEXT,
+  next_due_override INTEGER NOT NULL DEFAULT 0,
+  next_due_on TEXT,
+  override_reason TEXT NOT NULL DEFAULT '',
+  schedule_applied INTEGER NOT NULL DEFAULT 0,
+  previous_last_done TEXT,
+  previous_next_due TEXT,
+  previous_override INTEGER NOT NULL DEFAULT 0,
+  previous_override_reason TEXT NOT NULL DEFAULT '',
+  previous_schedule_check_id INTEGER,
+  amends_check_id INTEGER REFERENCES compliance_checks(id) ON DELETE RESTRICT,
+  superseded_by_id INTEGER REFERENCES compliance_checks(id) ON DELETE RESTRICT,
+  amendment_reason TEXT NOT NULL DEFAULT '',
+  recorded_at TEXT NOT NULL
+);
+CREATE INDEX idx_checks_activity ON compliance_checks(activity_id, performed_on);
+
+CREATE TABLE activity_schedule_log (
+  id INTEGER PRIMARY KEY,
+  activity_id INTEGER NOT NULL REFERENCES compliance_activities(id) ON DELETE CASCADE,
+  changed_at TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('edit','check','amendment','type-interval','migration')),
+  check_id INTEGER REFERENCES compliance_checks(id) ON DELETE SET NULL,
+  old_last_done TEXT, new_last_done TEXT,
+  old_next_due TEXT, new_next_due TEXT,
+  old_override INTEGER NOT NULL DEFAULT 0, new_override INTEGER NOT NULL DEFAULT 0,
+  note TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX idx_schedlog_activity ON activity_schedule_log(activity_id, changed_at);
+`,
+    up: (db) => {
+      // Classify existing schedules. A stored next-due equal to last done + interval becomes "derived";
+      // a different stored date is preserved as an explicit override (never silently changed).
+      const rows = db.prepare(
+        `SELECT a.id, a.last_done_on, a.next_due_on, a.interval_months, t.suggested_interval_months AS type_interval
+         FROM compliance_activities a JOIN compliance_types t ON t.id = a.type_id`,
+      ).all() as { id: number; last_done_on: string | null; next_due_on: string | null; interval_months: number | null; type_interval: number | null }[];
+      const setOverride = db.prepare("UPDATE compliance_activities SET next_due_override = 1, next_due_override_reason = 'Explicit next-due date entered before v0.4 (kept as override)' WHERE id = ?");
+      const setDerived = db.prepare('UPDATE compliance_activities SET next_due_on = ? WHERE id = ?');
+      for (const r of rows) {
+        const derived = derivedNextDue(r.last_done_on, r.interval_months ?? r.type_interval);
+        if (r.next_due_on && r.next_due_on !== derived) setOverride.run(r.id);
+        else if (!r.next_due_on && derived) setDerived.run(derived, r.id);
+      }
+    },
   },
 ];

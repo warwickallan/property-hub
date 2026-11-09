@@ -153,7 +153,12 @@ export function seedDemo(db: DB, uploadsDir: string, today: string): boolean {
       ['Lounge', [['Television', 'Portable appliance']]],
     ] as const;
 
-    let roomNo = 0, eqNo = 0, actNo = 0;
+    let roomNo = 0, eqNo = 0, actNo = 0, checkNo = 0;
+    const check = db.prepare(
+      `INSERT INTO compliance_checks (ref, activity_id, performed_on, inspector_user_id, provider_name, outcome, notes, certificate_document_id,
+         interval_months_used, proposed_next_due, next_due_on, schedule_applied, recorded_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+    );
     const writeDoc = (label: string, issued: string | null, validUntil: string | null, verified: boolean) => {
       const key = `${crypto.randomUUID()}.pdf`;
       const bytes = dummyPdf(`${label} - demo certificate`);
@@ -190,8 +195,10 @@ export function seedDemo(db: DB, uploadsDir: string, today: string): boolean {
         if (tcode === 'GAS' && !gasRoom) continue;
         const level = tcode === 'GAS' ? 'room' : 'site';
         const offset = s.dueOffset === undefined ? 60 + ((i * 37 + j * 53) % 300) : s.dueOffset;
-        const due = offset === null ? null : addDays(today, offset);
-        const last = due && t.m ? addMonths(due, -t.m) : null;
+        const target = offset === null ? null : addDays(today, offset);
+        const last = target && t.m ? addMonths(target, -t.m) : null;
+        // Next due is always derived from last done + interval (same arithmetic as the app).
+        const due = last && t.m ? addMonths(last, t.m) : target;
         const ref = code('PH-C', ++actNo);
         const aid = Number(
           act.run({
@@ -211,7 +218,13 @@ export function seedDemo(db: DB, uploadsDir: string, today: string): boolean {
         const docKind = s.doc ?? 'verified';
         if (docKind !== 'none' && due) {
           const did = writeDoc(`${ref} ${tcode} ${siteCode}`, last, due, docKind === 'verified');
-          docLink.run(did, 'activity', aid, 'evidence', now);
+          docLink.run(did, 'activity', aid, 'certificate', now);
+          // The historical check that produced this certificate and set the current schedule.
+          if (last) {
+            const cid = Number(check.run(`PH-K${String(++checkNo).padStart(3, '0')}`, aid, last, users[i <= 5 ? 1 : 2], tcode === 'GAS' ? 'Demo Gas Engineer Ltd (fictional)' : '',
+              'Satisfactory', 'Fictional demo check', did, t.m, due, due, now).lastInsertRowid);
+            db.prepare('UPDATE compliance_activities SET schedule_check_id = ? WHERE id = ?').run(cid, aid);
+          }
           if (tcode === 'FRA') docLink.run(did, 'site', siteId, 'evidence', now); // same file, second context
         }
         if (s.critical) action.run(aid, siteId, s.critical, owner, addDays(today, 7), now, now);
