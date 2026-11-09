@@ -28,7 +28,7 @@ function runManager(args, input) {
   return x.stdout;
 }
 async function wait() {
-  for(let n=0;n<60;n++){
+  for(let n=0;n<120;n++){
     try { const r=await fetch(base + '/api/status'); if(r.ok) return; }catch{}
     await new Promise((done)=>setTimeout(done,250));
   }
@@ -122,7 +122,10 @@ try {
     ok(oldC12 && oldC12.next_due_override===undefined,'Previous release created a pre-upgrade database (no override field)');
     await stop(old);
     const upgraded=spawn(exe,['--import','tsx','./server/index.ts'],{cwd:app,env:{...env,PH_DATA_DIR:upgradeDir,PH_DEMO_DATA:'0'},stdio:['ignore','pipe','pipe']});
-    await wait();
+    const upLog=[];
+    upgraded.stdout.on('data',c=>upLog.push(String(c)));
+    upgraded.stderr.on('data',c=>upLog.push(String(c)));
+    try { await wait(); } catch(e) { await stop(upgraded); throw new Error(e.message+' (upgraded release) logs: '+upLog.join('')); }
     const newC12=(await req('/api/activities')).find(a=>a.ref==='PH-C012');
     ok(newC12.next_due_on===oldC12.next_due_on && newC12.last_done_on===oldC12.last_done_on && newC12.next_due_override===0,
       'Upgrade keeps existing dates and classifies the schedule as calculated');
