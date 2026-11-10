@@ -23,6 +23,7 @@ coverage/
 *.db-shm
 storage/
 uploads/
+outbox/
 data/private/
 *.bak
 
@@ -37,3 +38,6 @@ tmp/
 Thumbs.db
 .vscode/
 .idea/
+
+# Browser journey output
+e2e/output/
